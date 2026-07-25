@@ -8,7 +8,7 @@ export interface RenderState {
   readonly palette: number;
   readonly colorDensity: number;
   readonly colorOffset: number;
-  readonly parameters: ReadonlyMap<string, FractalParameterValue>;
+  readonly parameters: Readonly<Record<string, FractalParameterValue>>;
 }
 
 const REQUIRED_UNIFORMS = [
@@ -171,7 +171,7 @@ export class FractalRenderer {
 
     for (const parameter of this.#formula.parameters) {
       const location = this.#parameterUniforms.get(parameter.key);
-      const value = state.parameters.get(parameter.key);
+      const value = state.parameters[parameter.key];
 
       if (!location || value === undefined) {
         continue;

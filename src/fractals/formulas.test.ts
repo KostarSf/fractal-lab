@@ -36,7 +36,7 @@ describe("fractal formula registry", () => {
     const firstDefaults = createDefaultParameters(julia!);
     const secondDefaults = createDefaultParameters(julia!);
 
-    expect(firstDefaults.get("constant")).toEqual([-0.745, 0.113]);
-    expect(firstDefaults.get("constant")).not.toBe(secondDefaults.get("constant"));
+    expect(firstDefaults.constant).toEqual([-0.745, 0.113]);
+    expect(firstDefaults.constant).not.toBe(secondDefaults.constant);
   });
 });

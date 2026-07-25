@@ -128,14 +128,13 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
 
 export function createDefaultParameters(
   formula: FractalFormula,
-): ReadonlyMap<string, FractalParameterValue> {
-  return new Map(
-    formula.parameters.map((parameter) => {
-      const value =
-        parameter.type === "complex"
-          ? ([...parameter.defaultValue] as const)
-          : parameter.defaultValue;
-      return [parameter.key, value];
-    }),
+): Record<string, FractalParameterValue> {
+  return Object.fromEntries(
+    formula.parameters.map((parameter) => [
+      parameter.key,
+      parameter.type === "complex"
+        ? ([...parameter.defaultValue] as const)
+        : parameter.defaultValue,
+    ]),
   );
 }
