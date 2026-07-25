@@ -72,13 +72,10 @@ Z_0 = 0,\qquad Z_{n+1} = \overline{Z_n}^{\,2} + c
 
 \[
 \Delta_{n+1}
-=
-
-2\overline{Z_n}\,\overline{\Delta_n}
-
-- \overline{\Delta_n}^{\,2}
-- \delta c
-  \]
+=2\overline{Z_n}\,\overline{\Delta_n}
+{}+\overline{\Delta_n}^{\,2}
+{}+\delta c
+\]
 
 Reference orbit и GPU-рекуррентность должны одинаково применять комплексное
 сопряжение.
@@ -105,13 +102,10 @@ Z_{n+1} = A(Z_n)^2 + c
 
 \[
 \Delta_{n+1}
-=
-
-2A(Z_n)\delta A_n
-
-- \delta A_n^2
-- \delta c
-  \]
+=2A(Z_n)\delta A_n
+{}+\delta A_n^2
+{}+\delta c
+\]
 
 Из-за смены знаков около действительной и мнимой осей это кусочно-гладкая
 формула. Необходимо отдельно обнаруживать sign-boundary glitches и выполнять
@@ -129,13 +123,10 @@ Z_{n+1} = Z_n^2 + c + pZ_{n-1}
 
 \[
 \Delta_{n+1}
-=
-
-2Z_n\Delta_n
-
-- \Delta_n^2
-- p\Delta_{n-1}
-  \]
+=2Z_n\Delta_n
+{}+\Delta_n^2
+{}+p\Delta_{n-1}
+\]
 
 Начальные условия для динамической плоскости:
 
