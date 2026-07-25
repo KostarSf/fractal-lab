@@ -7,6 +7,10 @@ describe("fractal store", () => {
     setActivePinia(createPinia());
   });
 
+  it("enables smooth colors by default", () => {
+    expect(useFractalStore().smoothColors).toBe(true);
+  });
+
   it("switches formulas and restores their defaults", () => {
     const store = useFractalStore();
 

@@ -241,6 +241,7 @@ function scheduleRender(): void {
         palette: store.palette,
         colorDensity: store.colorDensity,
         colorOffset: store.colorOffset,
+        smoothColors: store.smoothColors,
         parameters: store.parameterValues,
       });
     } catch (error) {

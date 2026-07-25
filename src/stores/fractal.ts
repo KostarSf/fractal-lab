@@ -12,6 +12,7 @@ interface FractalState {
   palette: number;
   colorDensity: number;
   colorOffset: number;
+  smoothColors: boolean;
   parameterValues: Record<string, FractalParameterValue>;
 }
 
@@ -28,6 +29,7 @@ export const useFractalStore = defineStore("fractal", {
     palette: 0,
     colorDensity: 0.075,
     colorOffset: 0,
+    smoothColors: true,
     parameterValues: createDefaultParameters(DEFAULT_FORMULA),
   }),
 

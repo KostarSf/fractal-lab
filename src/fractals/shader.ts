@@ -38,6 +38,7 @@ uniform int u_maxIterations;
 uniform int u_palette;
 uniform float u_colorDensity;
 uniform float u_colorOffset;
+uniform bool u_smoothColors;
 
 ${parameterDeclaration(formula)}
 
@@ -124,11 +125,14 @@ void main() {
     return;
   }
 
-  float logMagnitude = 0.5 * log(max(dot(z, z), 1.000001));
-  float smoothing = log(max(logMagnitude / log(2.0), 0.000001));
-  float smoothIteration =
-    float(iteration) + 1.0 - smoothing / log(${formula.escapePower.toFixed(1)});
-  float colorPosition = smoothIteration * u_colorDensity + u_colorOffset;
+  float colorIteration = float(iteration);
+  if (u_smoothColors) {
+    float logMagnitude = 0.5 * log(max(dot(z, z), 1.000001));
+    float smoothing = log(max(logMagnitude / log(2.0), 0.000001));
+    colorIteration += 1.0 - smoothing / log(${formula.escapePower.toFixed(1)});
+  }
+
+  float colorPosition = colorIteration * u_colorDensity + u_colorOffset;
   vec3 color = max(palette(colorPosition), vec3(0.0));
 
   color += (noise(gl_FragCoord.xy) - 0.5) / 255.0;

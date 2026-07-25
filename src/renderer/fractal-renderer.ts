@@ -8,6 +8,7 @@ export interface RenderState {
   readonly palette: number;
   readonly colorDensity: number;
   readonly colorOffset: number;
+  readonly smoothColors: boolean;
   readonly parameters: Readonly<Record<string, FractalParameterValue>>;
 }
 
@@ -19,6 +20,7 @@ const REQUIRED_UNIFORMS = [
   "u_palette",
   "u_colorDensity",
   "u_colorOffset",
+  "u_smoothColors",
 ] as const;
 
 type RequiredUniform = (typeof REQUIRED_UNIFORMS)[number];
@@ -168,6 +170,7 @@ export class FractalRenderer {
     gl.uniform1i(this.#uniforms.get("u_palette")!, state.palette);
     gl.uniform1f(this.#uniforms.get("u_colorDensity")!, state.colorDensity);
     gl.uniform1f(this.#uniforms.get("u_colorOffset")!, state.colorOffset);
+    gl.uniform1i(this.#uniforms.get("u_smoothColors")!, state.smoothColors ? 1 : 0);
 
     for (const parameter of this.#formula.parameters) {
       const location = this.#parameterUniforms.get(parameter.key);

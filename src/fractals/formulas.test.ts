@@ -21,6 +21,8 @@ describe("fractal formula registry", () => {
       expect(shader).toContain(formula.shader.setup.trim());
       expect(shader).toContain(formula.shader.iterate.trim());
       expect(shader).toContain(`if (${formula.shader.escaped})`);
+      expect(shader).toContain("uniform bool u_smoothColors;");
+      expect(shader).toContain("if (u_smoothColors)");
 
       for (const parameter of formula.parameters) {
         const glslType = parameter.type === "complex" ? "vec2" : "float";

@@ -4,7 +4,8 @@ import { FRACTAL_FORMULAS } from "../fractals/formulas.ts";
 import { useFractalStore } from "../stores/fractal.ts";
 
 const store = useFractalStore();
-const { activeFormula, colorDensity, maxIterations, palette, parameterValues } = storeToRefs(store);
+const { activeFormula, colorDensity, maxIterations, palette, parameterValues, smoothColors } =
+  storeToRefs(store);
 
 function eventValue(event: Event): string {
   return (event.target as HTMLInputElement | HTMLSelectElement).value;
@@ -151,6 +152,14 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
             <option :value="3">Arctic dusk</option>
           </select>
         </span>
+      </label>
+
+      <label class="toggle-field">
+        <span>
+          <span>Сглаживание</span>
+          <small>Плавные переходы между итерациями</small>
+        </span>
+        <input v-model="smoothColors" type="checkbox" role="switch" aria-label="Сглаживать цвета" />
       </label>
 
       <label class="field range-field">
