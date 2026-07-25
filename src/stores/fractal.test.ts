@@ -25,10 +25,11 @@ describe("fractal store", () => {
   it("keeps camera scale inside the renderer limits", () => {
     const store = useFractalStore();
 
-    store.setCamera([1, -1], 1e-20);
-    expect(store.scale).toBe(1e-12);
+    store.setCamera([1, -1], 1e-100);
+    expect(store.scale).toBe(1e-35);
 
-    store.zoomFromCenter(1e20);
+    store.setCamera([1, -1], 7);
+    store.zoomFromCenter(2);
     expect(store.scale).toBe(8);
   });
 

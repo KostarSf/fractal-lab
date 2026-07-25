@@ -32,6 +32,9 @@ export interface FractalFormula {
   readonly initialView: FractalView;
   readonly suggestedIterations: number;
   readonly escapePower: number;
+  readonly deepZoom?: {
+    readonly backend: "mandelbrot-perturbation";
+  };
   readonly parameters: readonly FractalParameter[];
   readonly shader: {
     /**

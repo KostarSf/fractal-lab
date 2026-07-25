@@ -1,17 +1,49 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  ReferenceOrbitCancelledError,
+  ReferenceOrbitClient,
+} from "../deep-zoom/reference-orbit-client.ts";
+import type { ReferenceOrbitResult } from "../deep-zoom/types.ts";
 import type { ComplexValue } from "../fractals/types.ts";
+import { decimalDifferenceToNumber, shouldUseDeepZoom } from "../math/high-precision.ts";
+import { DeepZoomRenderer } from "../renderer/deep-zoom-renderer.ts";
 import { FractalRenderer } from "../renderer/fractal-renderer.ts";
 import { useFractalStore } from "../stores/fractal.ts";
 
 const store = useFractalStore();
 const canvas = ref<HTMLCanvasElement>();
 const errorMessage = ref("");
+const deepZoomStatus = ref<"idle" | "preparing" | "ready" | "error">("idle");
+const deepZoomPrecision = ref(0);
+const deepZoomError = ref("");
+
+const deepZoomMode = computed(
+  () =>
+    store.activeFormula.deepZoom?.backend === "mandelbrot-perturbation" &&
+    shouldUseDeepZoom(store.magnification),
+);
+const deepZoomLabel = computed(() => {
+  if (deepZoomStatus.value === "preparing") {
+    return "Подготовка опорной орбиты…";
+  }
+  if (deepZoomStatus.value === "ready") {
+    return `Deep zoom · ${deepZoomPrecision.value} digits`;
+  }
+  if (deepZoomStatus.value === "error") {
+    return deepZoomError.value || "Deep zoom недоступен";
+  }
+  return "Deep zoom";
+});
 
 let renderer: FractalRenderer | undefined;
+let deepRenderer: DeepZoomRenderer | undefined;
+let referenceOrbit: ReferenceOrbitResult | undefined;
+const referenceOrbitClient = new ReferenceOrbitClient();
 let resizeObserver: ResizeObserver | undefined;
 let renderFrame: number | undefined;
 let interactionTimer: number | undefined;
+let referenceTimer: number | undefined;
 let quality = 1;
 
 const activePointers = new Map<number, readonly [x: number, y: number]>();
@@ -44,6 +76,18 @@ watch(
   { deep: true },
 );
 
+watch(
+  () => [
+    store.activeFormulaId,
+    store.exactCenter[0],
+    store.exactCenter[1],
+    store.exactScale,
+    store.maxIterations,
+  ],
+  () => scheduleReferenceOrbit(),
+  { flush: "sync" },
+);
+
 onMounted(() => {
   initializeRenderer();
   resizeObserver = new ResizeObserver(() => scheduleRender());
@@ -61,6 +105,8 @@ onBeforeUnmount(() => {
   canvas.value?.removeEventListener("webglcontextrestored", initializeRenderer);
   if (renderFrame !== undefined) window.cancelAnimationFrame(renderFrame);
   if (interactionTimer !== undefined) window.clearTimeout(interactionTimer);
+  if (referenceTimer !== undefined) window.clearTimeout(referenceTimer);
+  referenceOrbitClient.cancel();
 });
 
 function initializeRenderer(): void {
@@ -71,10 +117,20 @@ function initializeRenderer(): void {
   try {
     renderer = new FractalRenderer(canvas.value);
     renderer.setFormula(store.activeFormula);
+    try {
+      deepRenderer = new DeepZoomRenderer(canvas.value);
+      deepZoomError.value = "";
+    } catch (error) {
+      deepRenderer = undefined;
+      deepZoomStatus.value = "error";
+      deepZoomError.value = error instanceof Error ? error.message : String(error);
+    }
     errorMessage.value = "";
+    scheduleReferenceOrbit();
     scheduleRender();
   } catch (error) {
     renderer = undefined;
+    deepRenderer = undefined;
     showError(error);
   }
 }
@@ -82,6 +138,9 @@ function initializeRenderer(): void {
 function handleContextLost(event: Event): void {
   event.preventDefault();
   renderer = undefined;
+  deepRenderer = undefined;
+  referenceOrbit = undefined;
+  referenceOrbitClient.cancel();
   errorMessage.value = "Контекст WebGL потерян. Ожидаем восстановления GPU.";
 }
 
@@ -119,15 +178,10 @@ function handlePointerMove(event: PointerEvent): void {
     const nextGesture = getGestureMetrics();
 
     if (previousGesture && nextGesture && nextGesture.distance > 0) {
-      const anchor = screenToComplex(previousGesture.midpoint[0], previousGesture.midpoint[1]);
-      const nextScale = Math.max(
-        1e-12,
-        Math.min(8, store.scale * (previousGesture.distance / nextGesture.distance)),
-      );
-      const normalized = screenToNormalized(nextGesture.midpoint[0], nextGesture.midpoint[1]);
-      store.setCamera(
-        [anchor[0] - normalized[0] * nextScale, anchor[1] - normalized[1] * nextScale],
-        nextScale,
+      store.transformCamera(
+        screenToNormalized(previousGesture.midpoint[0], previousGesture.midpoint[1]),
+        screenToNormalized(nextGesture.midpoint[0], nextGesture.midpoint[1]),
+        previousGesture.distance / nextGesture.distance,
       );
     }
   }
@@ -148,31 +202,15 @@ function handlePointerEnd(event: PointerEvent): void {
 function handleWheel(event: WheelEvent): void {
   event.preventDefault();
 
-  const anchor = screenToComplex(event.clientX, event.clientY);
+  const normalized = screenToNormalized(event.clientX, event.clientY);
   const factor = Math.exp(Math.max(-120, Math.min(120, event.deltaY)) * 0.002);
-  const nextScale = Math.max(1e-12, Math.min(8, store.scale * factor));
-  const ratio = nextScale / store.scale;
-
-  store.setCamera(
-    [
-      anchor[0] + (store.center[0] - anchor[0]) * ratio,
-      anchor[1] + (store.center[1] - anchor[1]) * ratio,
-    ],
-    nextScale,
-  );
+  store.transformCamera(normalized, normalized, factor);
   beginBriefInteraction();
 }
 
 function handleDoubleClick(event: MouseEvent): void {
-  const anchor = screenToComplex(event.clientX, event.clientY);
-  const ratio = 0.45;
-  store.setCamera(
-    [
-      anchor[0] + (store.center[0] - anchor[0]) * ratio,
-      anchor[1] + (store.center[1] - anchor[1]) * ratio,
-    ],
-    store.scale * ratio,
-  );
+  const normalized = screenToNormalized(event.clientX, event.clientY);
+  store.transformCamera(normalized, normalized, 0.45);
   beginBriefInteraction();
 }
 
@@ -181,15 +219,14 @@ function handleKeydown(event: KeyboardEvent): void {
     return;
   }
 
-  const panStep = store.scale * 0.08;
   if (event.key === "ArrowLeft") {
-    store.setCamera([store.center[0] - panStep, store.center[1]], store.scale);
+    store.panByNormalized([-0.08, 0]);
   } else if (event.key === "ArrowRight") {
-    store.setCamera([store.center[0] + panStep, store.center[1]], store.scale);
+    store.panByNormalized([0.08, 0]);
   } else if (event.key === "ArrowUp") {
-    store.setCamera([store.center[0], store.center[1] + panStep], store.scale);
+    store.panByNormalized([0, 0.08]);
   } else if (event.key === "ArrowDown") {
-    store.setCamera([store.center[0], store.center[1] - panStep], store.scale);
+    store.panByNormalized([0, -0.08]);
   } else if (event.key === "+" || event.key === "=") {
     store.zoomFromCenter(0.8);
   } else if (event.key === "-") {
@@ -233,29 +270,112 @@ function scheduleRender(): void {
     }
 
     try {
-      renderer.resize(quality);
-      renderer.render({
-        center: store.center,
-        scale: store.scale,
-        maxIterations: store.maxIterations,
-        palette: store.palette,
-        colorDensity: store.colorDensity,
-        colorOffset: store.colorOffset,
-        smoothColors: store.smoothColors,
-        parameters: store.parameterValues,
-      });
+      if (deepZoomMode.value && deepRenderer && referenceOrbit) {
+        deepRenderer.resize(quality);
+        deepRenderer.render({
+          centerDelta: [
+            decimalDifferenceToNumber(
+              store.exactCenter[0],
+              referenceOrbit.center[0],
+              store.exactScale,
+            ),
+            decimalDifferenceToNumber(
+              store.exactCenter[1],
+              referenceOrbit.center[1],
+              store.exactScale,
+            ),
+          ],
+          scale: Number(store.exactScale),
+          maxIterations: store.maxIterations,
+          palette: store.palette,
+          colorDensity: store.colorDensity,
+          colorOffset: store.colorOffset,
+          smoothColors: store.smoothColors,
+        });
+      } else {
+        renderer.resize(quality);
+        renderer.render({
+          center: store.center,
+          scale: store.scale,
+          maxIterations: store.maxIterations,
+          palette: store.palette,
+          colorDensity: store.colorDensity,
+          colorOffset: store.colorOffset,
+          smoothColors: store.smoothColors,
+          parameters: store.parameterValues,
+        });
+      }
     } catch (error) {
       showError(error);
     }
   });
 }
 
-function screenToComplex(clientX: number, clientY: number): ComplexValue {
-  const normalized = screenToNormalized(clientX, clientY);
-  return [
-    store.center[0] + normalized[0] * store.scale,
-    store.center[1] + normalized[1] * store.scale,
-  ];
+function scheduleReferenceOrbit(): void {
+  referenceOrbitClient.cancel();
+  if (referenceTimer !== undefined) {
+    window.clearTimeout(referenceTimer);
+    referenceTimer = undefined;
+  }
+
+  if (!deepZoomMode.value) {
+    referenceOrbit = undefined;
+    deepZoomStatus.value = "idle";
+    deepZoomPrecision.value = 0;
+    return;
+  }
+
+  if (!deepRenderer) {
+    deepZoomStatus.value = "error";
+    return;
+  }
+
+  deepZoomStatus.value = "preparing";
+  deepZoomError.value = "";
+  referenceTimer = window.setTimeout(() => {
+    referenceTimer = undefined;
+    void prepareReferenceOrbit();
+  }, 120);
+}
+
+async function prepareReferenceOrbit(): Promise<void> {
+  const center = [store.exactCenter[0], store.exactCenter[1]] as const;
+  const scale = store.exactScale;
+  const maxIterations = store.maxIterations;
+  const viewportAspect = canvas.value
+    ? canvas.value.clientWidth / Math.max(1, canvas.value.clientHeight)
+    : 1;
+
+  try {
+    const result = await referenceOrbitClient.request({
+      center,
+      scale,
+      maxIterations,
+      viewportAspect,
+    });
+
+    if (
+      !deepZoomMode.value ||
+      store.exactCenter[0] !== center[0] ||
+      store.exactCenter[1] !== center[1] ||
+      store.exactScale !== scale ||
+      store.maxIterations !== maxIterations
+    ) {
+      return;
+    }
+
+    deepRenderer?.setReferenceOrbit(result);
+    referenceOrbit = result;
+    deepZoomPrecision.value = result.precisionDigits;
+    deepZoomStatus.value = "ready";
+    scheduleRender();
+  } catch (error) {
+    if (error instanceof ReferenceOrbitCancelledError) {
+      return;
+    }
+    deepZoomStatus.value = "error";
+    deepZoomError.value = error instanceof Error ? error.message : String(error);
+  }
 }
 
 function screenToNormalized(clientX: number, clientY: number): ComplexValue {
@@ -300,5 +420,10 @@ function getGestureMetrics():
   <div v-if="errorMessage" class="render-error">
     <strong>Не удалось запустить GPU-рендерер</strong>
     <span>{{ errorMessage }}</span>
+  </div>
+
+  <div v-if="deepZoomMode" class="deep-zoom-status" :data-state="deepZoomStatus" role="status">
+    <i aria-hidden="true"></i>
+    <span>{{ deepZoomLabel }}</span>
   </div>
 </template>

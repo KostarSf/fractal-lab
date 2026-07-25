@@ -180,6 +180,63 @@ input[type="range"] {
   font-size: 14px;
 }
 
+.deep-zoom-status {
+  position: absolute;
+  z-index: 2;
+  top: 72px;
+  left: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 1px solid rgb(182 156 255 / 17%);
+  border-radius: 7px;
+  color: rgb(255 255 255 / 55%);
+  background: rgb(8 9 14 / 58%);
+  backdrop-filter: blur(10px);
+  font: 9px/1 var(--mono);
+  pointer-events: none;
+}
+
+.deep-zoom-status i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgb(182 156 255 / 55%);
+}
+
+.deep-zoom-status[data-state="preparing"] i {
+  animation: deep-zoom-pulse 900ms ease-in-out infinite alternate;
+}
+
+.deep-zoom-status[data-state="ready"] i {
+  background: #7ccda2;
+  box-shadow: 0 0 8px rgb(124 205 162 / 50%);
+}
+
+.deep-zoom-status[data-state="error"] {
+  border-color: rgb(255 117 117 / 22%);
+  color: #ffb0b0;
+}
+
+.deep-zoom-status[data-state="error"] i {
+  background: #ff8585;
+  box-shadow: 0 0 8px rgb(255 133 133 / 45%);
+}
+
+@keyframes deep-zoom-pulse {
+  from {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
 .controls {
   position: relative;
   z-index: 3;
@@ -576,6 +633,11 @@ input[type="range"]::-moz-range-thumb {
   .gesture-hint {
     bottom: 14px;
     white-space: nowrap;
+  }
+
+  .deep-zoom-status {
+    top: 60px;
+    left: 18px;
   }
 
   .desktop-hint {

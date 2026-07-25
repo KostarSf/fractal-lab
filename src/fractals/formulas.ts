@@ -8,6 +8,7 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     initialView: { center: [-0.65, 0], scale: 3.1 },
     suggestedIterations: 320,
     escapePower: 2,
+    deepZoom: { backend: "mandelbrot-perturbation" },
     parameters: [],
     shader: {
       setup: `

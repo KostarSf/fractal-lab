@@ -1,5 +1,5 @@
 {
-  "name": "fractal-demo",
+  "name": "fractal-lab",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,6 +10,7 @@
     "prepare": "vp config"
   },
   "dependencies": {
+    "decimal.js": "^10.6.0",
     "pinia": "^4.0.2",
     "vue": "^3.5.40"
   },

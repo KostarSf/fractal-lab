@@ -25,7 +25,11 @@ const REQUIRED_UNIFORMS = [
 
 type RequiredUniform = (typeof REQUIRED_UNIFORMS)[number];
 
-function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
+export function compileShader(
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
+): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) {
     throw new Error("WebGL не смог создать шейдер.");
@@ -43,9 +47,13 @@ function compileShader(gl: WebGL2RenderingContext, type: number, source: string)
   return shader;
 }
 
-function createProgram(gl: WebGL2RenderingContext, formula: FractalFormula): WebGLProgram {
-  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
-  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, createFragmentShader(formula));
+export function createWebGLProgram(
+  gl: WebGL2RenderingContext,
+  vertexSource: string,
+  fragmentSource: string,
+): WebGLProgram {
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
   const program = gl.createProgram();
 
   if (!program) {
@@ -69,7 +77,7 @@ function createProgram(gl: WebGL2RenderingContext, formula: FractalFormula): Web
   return program;
 }
 
-function getUniform(
+export function getUniform(
   gl: WebGL2RenderingContext,
   program: WebGLProgram,
   name: string,
@@ -117,7 +125,7 @@ export class FractalRenderer {
   }
 
   setFormula(formula: FractalFormula): void {
-    const program = createProgram(this.#gl, formula);
+    const program = createWebGLProgram(this.#gl, VERTEX_SHADER, createFragmentShader(formula));
     const uniforms = new Map<RequiredUniform, WebGLUniformLocation>();
     const parameterUniforms = new Map<string, WebGLUniformLocation>();
 

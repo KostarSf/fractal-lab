@@ -3,17 +3,18 @@ import { storeToRefs } from "pinia";
 import { computed } from "vue";
 import ControlPanel from "./components/ControlPanel.vue";
 import FractalCanvas from "./components/FractalCanvas.vue";
+import { formatDecimalCoordinate } from "./math/high-precision.ts";
 import { useFractalStore } from "./stores/fractal.ts";
 
 const store = useFractalStore();
-const { center, magnification, scale } = storeToRefs(store);
+const { exactCenter, exactScale, magnification } = storeToRefs(store);
 
 const zoomReadout = computed(() => `${formatZoom(magnification.value)}×`);
 const centerReadout = computed(
   () =>
-    `${formatCoordinate(center.value[0], scale.value)} ${
-      center.value[1] < 0 ? "−" : "+"
-    } ${formatCoordinate(Math.abs(center.value[1]), scale.value)}i`,
+    `${formatDecimalCoordinate(exactCenter.value[0], exactScale.value)} ${
+      exactCenter.value[1].startsWith("-") ? "−" : "+"
+    } ${formatDecimalCoordinate(exactCenter.value[1].replace("-", ""), exactScale.value)}i`,
 );
 
 function formatZoom(value: number): string {
@@ -21,11 +22,6 @@ function formatZoom(value: number): string {
   if (value >= 100) return Math.round(value).toLocaleString("ru-RU");
   if (value >= 10) return value.toFixed(1);
   return value.toFixed(2);
-}
-
-function formatCoordinate(value: number, currentScale: number): string {
-  const digits = Math.max(6, Math.min(12, Math.ceil(-Math.log10(currentScale)) + 3));
-  return value.toFixed(digits).replace("-", "−");
 }
 </script>
 
