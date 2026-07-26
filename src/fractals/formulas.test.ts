@@ -67,7 +67,21 @@ describe("fractal formula registry", () => {
       if (formula.renderer === "escape-time") {
         expect(shader).toContain(formula.shader.setup.trim());
         expect(shader).toContain(formula.shader.iterate.trim());
-        expect(shader).toContain(`if (${formula.shader.escaped})`);
+        expect(shader).toContain(`if (!didEscape && ${formula.shader.escaped})`);
+        expect(shader).toContain("int postEscapeIterations = 0;");
+        expect(shader).toContain("float(postEscapeIterations)");
+      } else {
+        expect(shader).toContain(
+          formula.basinBackend === "newton-cubic"
+            ? "iterateNewtonLocalError(previousZ - root, root)"
+            : "thresholdCrossingPhase(previousMetric, finalMetric",
+        );
+        if (formula.basinBackend === "newton-cubic") {
+          expect(shader).toContain("convergenceRefinementSteps");
+          expect(shader).toContain("stableComplexMagnitude(localError)");
+        }
+        expect(shader).toContain("colorIteration * u_colorDensity");
+        expect(shader).not.toContain("float convergence");
       }
 
       for (const parameter of formula.parameters) {

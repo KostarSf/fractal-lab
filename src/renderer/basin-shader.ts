@@ -18,13 +18,18 @@ function iterationCode(formula: RootBasinFormula): string {
   int resultKind = 0;
   int rootIndex = 0;
   int iteration = 0;
+  int convergenceRefinementSteps = 0;
   float finalMetric = 1.0;
+  float smoothingThreshold = max(u_convergenceTolerance, 1e-12);
+  vec2 previousZ = z;
+  bool hasPreviousZ = false;
 
   for (int i = 0; i < ${MAX_ITERATIONS}; i++) {
     if (i >= u_maxIterations) {
       break;
     }
 
+    vec2 zBeforeStep = z;
     vec2 zSquared = complexSquare(z);
     vec2 numerator = complexMultiply(zSquared, z) - vec2(1.0, 0.0);
     vec2 derivative = 3.0 * zSquared;
@@ -34,15 +39,27 @@ function iterationCode(formula: RootBasinFormula): string {
     }
 
     vec2 correction = complexDivide(numerator, derivative, denominator);
+    float currentMetric = length(correction);
     z -= correction;
     iteration = i;
-    finalMetric = length(correction);
+    finalMetric = currentMetric;
 
     if (dot(correction, correction) <= u_convergenceTolerance * u_convergenceTolerance) {
       rootIndex = nearestRoot(z);
+      vec2 root = cubicRoot(rootIndex);
+      vec2 localError = zBeforeStep - root;
+      if (hasPreviousZ) {
+        localError = iterateNewtonLocalError(previousZ - root, root);
+      }
+      localError = iterateNewtonLocalError(localError, root);
+      finalMetric = stableComplexMagnitude(localError);
+      convergenceRefinementSteps = 1;
       resultKind = 1;
       break;
     }
+
+    previousZ = zBeforeStep;
+    hasPreviousZ = true;
   }
 `;
   }
@@ -53,7 +70,10 @@ function iterationCode(formula: RootBasinFormula): string {
   int resultKind = 0;
   int rootIndex = 0;
   int iteration = 0;
+  float previousMetric = 1.0;
   float finalMetric = 1.0;
+  float smoothingThreshold = max(u_convergenceTolerance, 1e-12);
+  bool hasPreviousMetric = false;
   float escapeRadiusSquared = u_novaEscapeRadius * u_novaEscapeRadius;
 
   for (int i = 0; i < ${MAX_ITERATIONS}; i++) {
@@ -61,6 +81,7 @@ function iterationCode(formula: RootBasinFormula): string {
       break;
     }
 
+    float previousMagnitude = length(z);
     vec2 zSquared = complexSquare(z);
     vec2 numerator = complexMultiply(zSquared, z) - vec2(1.0, 0.0);
     vec2 derivative = 3.0 * zSquared;
@@ -74,9 +95,14 @@ function iterationCode(formula: RootBasinFormula): string {
     vec2 delta = nextZ - z;
     z = nextZ;
     iteration = i;
-    finalMetric = length(delta);
+    float currentMetric = length(delta);
+    finalMetric = currentMetric;
 
     if (dot(z, z) > escapeRadiusSquared) {
+      previousMetric = previousMagnitude;
+      finalMetric = length(z);
+      smoothingThreshold = max(u_novaEscapeRadius, 1e-12);
+      hasPreviousMetric = true;
       resultKind = 2;
       break;
     }
@@ -85,7 +111,28 @@ function iterationCode(formula: RootBasinFormula): string {
       resultKind = 1;
       break;
     }
+
+    previousMetric = currentMetric;
+    hasPreviousMetric = true;
   }
+`;
+}
+
+function smoothingCode(formula: RootBasinFormula): string {
+  if (formula.basinBackend === "newton-cubic") {
+    return `
+    colorIteration += quadraticConvergencePhase(
+      finalMetric,
+      smoothingThreshold,
+      convergenceRefinementSteps
+    );
+`;
+  }
+
+  return `
+    colorIteration += hasPreviousMetric
+      ? thresholdCrossingPhase(previousMetric, finalMetric, smoothingThreshold)
+      : 1.0;
 `;
 }
 
@@ -139,6 +186,85 @@ int nearestRoot(vec2 value) {
   return 2;
 }
 
+vec2 cubicRoot(int index) {
+  if (index == 0) return vec2(1.0, 0.0);
+  if (index == 1) return vec2(-0.5, 0.866025403784);
+  return vec2(-0.5, -0.866025403784);
+}
+
+float stableComplexMagnitude(vec2 value) {
+  float scale = max(abs(value.x), abs(value.y));
+  if (scale == 0.0) {
+    return 0.0;
+  }
+  return scale * length(value / scale);
+}
+
+vec2 iterateNewtonLocalError(vec2 error, vec2 root) {
+  vec2 errorSquared = complexSquare(error);
+  vec2 numerator = complexMultiply(errorSquared, 3.0 * root + 2.0 * error);
+  vec2 denominator = 3.0 * complexSquare(root + error);
+  float denominatorSquared = dot(denominator, denominator);
+  if (denominatorSquared < 1e-20) {
+    return vec2(0.0);
+  }
+  return complexDivide(numerator, denominator, denominatorSquared);
+}
+
+float thresholdCrossingPhase(
+  float previousMetric,
+  float currentMetric,
+  float threshold
+) {
+  vec3 metrics = vec3(previousMetric, currentMetric, threshold);
+  if (
+    any(isnan(metrics)) ||
+    any(isinf(metrics)) ||
+    any(lessThanEqual(metrics, vec3(0.0)))
+  ) {
+    return 1.0;
+  }
+
+  float previousLog = log(previousMetric);
+  float currentLog = log(currentMetric);
+  float denominator = currentLog - previousLog;
+  if (abs(denominator) < 1e-6) {
+    return 1.0;
+  }
+
+  return clamp((log(threshold) - previousLog) / denominator, 0.0, 1.0);
+}
+
+float quadraticConvergencePhase(
+  float currentMetric,
+  float threshold,
+  int refinementSteps
+) {
+  if (currentMetric == 0.0) {
+    return 0.0;
+  }
+  if (
+    isnan(currentMetric) ||
+    isinf(currentMetric) ||
+    isnan(threshold) ||
+    isinf(threshold) ||
+    currentMetric < 0.0 ||
+    currentMetric >= 1.0 ||
+    threshold <= 0.0 ||
+    threshold >= 1.0
+  ) {
+    return 1.0;
+  }
+
+  float metricLog = -log(currentMetric);
+  float thresholdLog = -log(threshold);
+  float phase =
+    1.0 +
+    float(max(refinementSteps, 0)) -
+    log(metricLog / thresholdLog) / log(2.0);
+  return clamp(phase, 0.0, 1.0);
+}
+
 vec3 cosinePalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
   return a + b * cos(6.28318530718 * (c * t + d));
 }
@@ -189,26 +315,25 @@ ${iterationCode(formula)}
     return;
   }
 
-  float normalizedIteration = float(iteration) / max(float(u_maxIterations), 1.0);
+  float colorIteration = float(iteration);
+  if (u_smoothColors) {
+${smoothingCode(formula)}
+  }
+
+  float normalizedIteration =
+    clamp(colorIteration / max(float(u_maxIterations), 1.0), 0.0, 1.0);
   float rootPosition = float(rootIndex) / 3.0;
   float colorPosition;
   if (resultKind == 2) {
-    colorPosition = float(iteration) * u_colorDensity + u_colorOffset;
+    colorPosition = colorIteration * u_colorDensity + u_colorOffset;
   } else {
     colorPosition =
       rootPosition +
-      float(iteration) * u_colorDensity * 0.18 +
+      colorIteration * u_colorDensity * 0.18 +
       u_colorOffset;
   }
 
-  float shade;
-  if (u_smoothColors) {
-    float convergence =
-      clamp(-log(max(finalMetric, 1e-12)) / (12.0 * log(10.0)), 0.0, 1.0);
-    shade = mix(0.38, 1.0, 0.55 * (1.0 - normalizedIteration) + 0.45 * convergence);
-  } else {
-    shade = 0.58 + 0.42 * (1.0 - normalizedIteration);
-  }
+  float shade = 0.58 + 0.42 * (1.0 - normalizedIteration);
 
   vec3 color = max(palette(colorPosition), vec3(0.0)) * shade;
   if (resultKind == 2) {

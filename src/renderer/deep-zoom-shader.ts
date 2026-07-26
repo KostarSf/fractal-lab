@@ -1,6 +1,8 @@
 import type { DeepZoomBackendId } from "../fractals/types.ts";
+import { ESCAPE_SMOOTHING_ITERATIONS } from "../fractals/coloring.ts";
 
 const MAX_ITERATIONS = 2_048;
+const MAX_SHADER_ITERATIONS = MAX_ITERATIONS + ESCAPE_SMOOTHING_ITERATIONS;
 
 interface DeepZoomShaderBackend {
   readonly texelsPerIteration: 1 | 2;
@@ -315,13 +317,15 @@ void main() {
   vec2 actualZ = vec2(0.0);
   int referenceIndex = 0;
   int iteration = 0;
+  int postEscapeIterations = 0;
   bool didEscape = false;
 
-  for (int i = 0; i < ${MAX_ITERATIONS}; i++) {
-    if (i >= u_maxIterations) {
+  for (int i = 0; i < ${MAX_SHADER_ITERATIONS}; i++) {
+    if (!didEscape && i >= u_maxIterations) {
       break;
     }
 
+    bool wasEscaped = didEscape;
     vec4 referenceCurrent = fetchReference(referenceIndex, 0);
     vec4 referencePrevious = ${referencePrevious};
     vec2 actualCurrent = addReference(referenceCurrent, deltaCurrent);
@@ -338,10 +342,12 @@ void main() {
     deltaCurrent = nextDeltaCurrent;
     deltaPrevious = nextDeltaPrevious;
 
-    if (dot(actualZ, actualZ) > 4.0) {
+    if (!didEscape && dot(actualZ, actualZ) > 4.0) {
       iteration = i;
       didEscape = true;
-      break;
+      if (!u_smoothColors || dot(actualZ, actualZ) > 1e24) {
+        break;
+      }
     }
 
     bool referenceExhausted = nextReferenceIndex >= u_referenceCount - 1;
@@ -354,6 +360,16 @@ void main() {
     } else {
       referenceIndex = nextReferenceIndex;
     }
+
+    if (wasEscaped) {
+      postEscapeIterations += 1;
+      if (
+        postEscapeIterations >= ${ESCAPE_SMOOTHING_ITERATIONS} ||
+        dot(actualZ, actualZ) > 1e24
+      ) {
+        break;
+      }
+    }
   }
 
   if (!didEscape) {
@@ -365,7 +381,10 @@ void main() {
   if (u_smoothColors) {
     float logMagnitude = 0.5 * log(max(dot(actualZ, actualZ), 1.000001));
     float smoothing = log(max(logMagnitude / log(2.0), 0.000001));
-    colorIteration += 1.0 - smoothing / log(2.0);
+    colorIteration +=
+      1.0 +
+      float(postEscapeIterations) -
+      smoothing / log(2.0);
   }
 
   float colorPosition = colorIteration * u_colorDensity + u_colorOffset;

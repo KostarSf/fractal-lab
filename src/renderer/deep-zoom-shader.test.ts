@@ -11,6 +11,8 @@ describe("deep zoom shader registry", () => {
       expect(shader).toContain("ivec2(component, index)");
       expect(deepZoomTexelsPerIteration(backend)).toBeGreaterThanOrEqual(1);
       expect(shader).toContain("if (referenceExhausted || unstable || forceRebase)");
+      expect(shader).toContain("int postEscapeIterations = 0;");
+      expect(shader).toContain("float(postEscapeIterations)");
     }
   });
 

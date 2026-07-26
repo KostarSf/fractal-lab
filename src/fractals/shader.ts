@@ -1,6 +1,8 @@
 import type { EscapeTimeFormula } from "./types.ts";
+import { ESCAPE_SMOOTHING_ITERATIONS } from "./coloring.ts";
 
 const MAX_ITERATIONS = 2048;
+const MAX_SHADER_ITERATIONS = MAX_ITERATIONS + ESCAPE_SMOOTHING_ITERATIONS;
 
 export const VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -104,19 +106,33 @@ void main() {
   ${formula.shader.setup}
 
   int iteration = 0;
+  int postEscapeIterations = 0;
   bool didEscape = false;
 
-  for (int i = 0; i < ${MAX_ITERATIONS}; i++) {
-    if (i >= u_maxIterations) {
+  for (int i = 0; i < ${MAX_SHADER_ITERATIONS}; i++) {
+    if (!didEscape && i >= u_maxIterations) {
       break;
     }
 
+    bool wasEscaped = didEscape;
     ${formula.shader.iterate}
 
-    if (${formula.shader.escaped}) {
+    if (!didEscape && ${formula.shader.escaped}) {
       iteration = i;
       didEscape = true;
-      break;
+      if (!u_smoothColors || dot(z, z) > 1e24) {
+        break;
+      }
+    }
+
+    if (wasEscaped) {
+      postEscapeIterations += 1;
+      if (
+        postEscapeIterations >= ${ESCAPE_SMOOTHING_ITERATIONS} ||
+        dot(z, z) > 1e24
+      ) {
+        break;
+      }
     }
   }
 
@@ -129,7 +145,10 @@ void main() {
   if (u_smoothColors) {
     float logMagnitude = 0.5 * log(max(dot(z, z), 1.000001));
     float smoothing = log(max(logMagnitude / log(2.0), 0.000001));
-    colorIteration += 1.0 - smoothing / log(${formula.escapePower.toFixed(1)});
+    colorIteration +=
+      1.0 +
+      float(postEscapeIterations) -
+      smoothing / log(${formula.escapePower.toFixed(1)});
   }
 
   float colorPosition = colorIteration * u_colorDensity + u_colorOffset;
