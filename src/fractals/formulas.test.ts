@@ -70,4 +70,20 @@ describe("fractal formula registry", () => {
     expect(firstDefaults.constant).toEqual([-0.745, 0.113]);
     expect(firstDefaults.constant).not.toBe(secondDefaults.constant);
   });
+
+  it("provides a bounded, renderable preview preset for every formula", () => {
+    for (const formula of FRACTAL_FORMULAS) {
+      expect(formula.preview.view.scale).toBeGreaterThan(0);
+      expect(formula.preview.view.center.every(Number.isFinite)).toBe(true);
+      expect(formula.preview.palette ?? 0).toBeGreaterThanOrEqual(0);
+      expect(formula.preview.palette ?? 0).toBeLessThanOrEqual(3);
+
+      for (const key of Object.keys(formula.preview.parameters ?? {})) {
+        expect(formula.parameters.some((parameter) => parameter.key === key)).toBe(true);
+      }
+    }
+
+    const clifford = FRACTAL_FORMULAS.find((formula) => formula.id === "clifford");
+    expect(clifford?.preview.parameters?.pointCount).toBeLessThan(500000);
+  });
 });

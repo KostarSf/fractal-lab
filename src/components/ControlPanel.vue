@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { computed } from "vue";
-import { FRACTAL_FORMULAS } from "../fractals/formulas.ts";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useFractalStore } from "../stores/fractal.ts";
+import FormulaPickerDialog from "./FormulaPickerDialog.vue";
 
 const store = useFractalStore();
 const { activeFormula, colorDensity, maxIterations, palette, parameterValues, smoothColors } =
@@ -16,6 +16,32 @@ const rendererLabel = computed(() => {
   }
   return "GPU escape-time renderer";
 });
+const pickerOpen = ref(false);
+
+onMounted(() => {
+  window.addEventListener("keydown", handleFormulaPickerShortcut);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleFormulaPickerShortcut);
+});
+
+function handleFormulaPickerShortcut(event: KeyboardEvent): void {
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  const hasPlatformModifier = isMac ? event.metaKey : event.ctrlKey;
+
+  if (
+    event.key.toLocaleLowerCase() !== "k" ||
+    !hasPlatformModifier ||
+    event.altKey ||
+    event.shiftKey
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  pickerOpen.value = true;
+}
 
 function eventValue(event: Event): string {
   return (event.target as HTMLInputElement | HTMLSelectElement).value;
@@ -81,20 +107,20 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
     </div>
 
     <div class="control-stack">
-      <label class="field">
+      <div class="field formula-picker-field">
         <span>Формула</span>
-        <span class="select-wrap">
-          <select
-            id="formula-select"
-            :value="activeFormula.id"
-            @change="store.selectFormula(eventValue($event))"
-          >
-            <option v-for="formula in FRACTAL_FORMULAS" :key="formula.id" :value="formula.id">
-              {{ formula.label }}
-            </option>
-          </select>
-        </span>
-      </label>
+        <button
+          class="formula-picker-button"
+          type="button"
+          aria-label="Открыть выбор формулы"
+          @click="pickerOpen = true"
+        >
+          <span>{{ activeFormula.label }}</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m8 10 4 4 4-4" />
+          </svg>
+        </button>
+      </div>
       <p class="formula-description">{{ activeFormula.description }}</p>
 
       <div
@@ -198,5 +224,61 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
       <span class="gpu-status"><i aria-hidden="true"></i> WebGL2</span>
       <span>{{ rendererLabel }}</span>
     </footer>
+
+    <FormulaPickerDialog v-if="pickerOpen" @close="pickerOpen = false" />
   </aside>
 </template>
+
+<style scoped>
+.formula-picker-field {
+  margin-bottom: 20px;
+}
+
+.formula-picker-button {
+  display: flex;
+  width: 100%;
+  height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 11px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: #d2d1d8;
+  background: var(--panel-raised);
+  font-size: 11px;
+  text-align: left;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease,
+    background 150ms ease;
+}
+
+.formula-picker-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.formula-picker-button svg {
+  width: 15px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: #777883;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.formula-picker-button:hover {
+  border-color: rgb(182 156 255 / 34%);
+  color: var(--accent-bright);
+  background: rgb(182 156 255 / 7%);
+}
+
+.formula-picker-button:focus-visible {
+  outline: 2px solid rgb(182 156 255 / 72%);
+  outline-offset: 2px;
+}
+</style>

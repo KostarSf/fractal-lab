@@ -12,6 +12,15 @@ export interface IterationControl {
   readonly step: number;
 }
 
+export interface FractalPreview {
+  readonly view: FractalView;
+  readonly iterations?: number;
+  readonly palette?: number;
+  readonly colorDensity?: number;
+  readonly colorOffset?: number;
+  readonly parameters?: Readonly<Record<string, FractalParameterValue>>;
+}
+
 interface ParameterBase {
   readonly key: string;
   readonly label: string;
@@ -40,6 +49,7 @@ interface FractalFormulaBase {
   readonly label: string;
   readonly description: string;
   readonly initialView: FractalView;
+  readonly preview: FractalPreview;
   readonly suggestedIterations: number;
   readonly iterationControl?: IterationControl;
   readonly parameters: readonly FractalParameter[];

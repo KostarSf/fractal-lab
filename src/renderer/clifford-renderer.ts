@@ -183,7 +183,8 @@ export class CliffordRenderer {
       return;
     }
 
-    const pixelRatio = this.#canvas.width / Math.max(1, this.#canvas.clientWidth);
+    const pixelRatio =
+      this.#canvas.clientWidth > 0 ? this.#canvas.width / this.#canvas.clientWidth : 1;
     const pointSize = Math.min(this.#maxPointSize, Math.max(1, state.pointSize * pixelRatio));
     const drawCount = Math.max(
       1,

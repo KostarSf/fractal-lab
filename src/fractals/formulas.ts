@@ -7,6 +7,12 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     description: "Классическая орбита z² + c, начинающаяся в нуле.",
     renderer: "escape-time",
     initialView: { center: [-0.65, 0], scale: 3.1 },
+    preview: {
+      view: { center: [-0.65, 0], scale: 3.1 },
+      iterations: 240,
+      palette: 0,
+      colorDensity: 0.062,
+    },
     suggestedIterations: 320,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
@@ -29,6 +35,12 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     description: "Та же квадратичная динамика с фиксированным параметром c.",
     renderer: "escape-time",
     initialView: { center: [0, 0], scale: 3.2 },
+    preview: {
+      view: { center: [0, 0], scale: 3.2 },
+      iterations: 260,
+      palette: 0,
+      colorDensity: 0.062,
+    },
     suggestedIterations: 360,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
@@ -59,6 +71,12 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     description: "Перед возведением в квадрат обе координаты z берутся по модулю.",
     renderer: "escape-time",
     initialView: { center: [-0.45, -0.5], scale: 3.4 },
+    preview: {
+      view: { center: [-0.45, -0.5], scale: 3.4 },
+      iterations: 260,
+      palette: 2,
+      colorDensity: 0.058,
+    },
     suggestedIterations: 380,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
@@ -80,6 +98,12 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     description: "Антиголоморфный вариант Мандельброта: conjugate(z)² + c.",
     renderer: "escape-time",
     initialView: { center: [0, 0], scale: 3.5 },
+    preview: {
+      view: { center: [0, 0], scale: 3.5 },
+      iterations: 240,
+      palette: 1,
+      colorDensity: 0.06,
+    },
     suggestedIterations: 340,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
@@ -101,6 +125,12 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     description: "Орбита с памятью: следующий шаг зависит от предыдущего z.",
     renderer: "escape-time",
     initialView: { center: [0, 0], scale: 3.2 },
+    preview: {
+      view: { center: [0, 0], scale: 3.2 },
+      iterations: 280,
+      palette: 0,
+      colorDensity: 0.052,
+    },
     suggestedIterations: 380,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
@@ -142,6 +172,12 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     renderer: "root-basin",
     basinBackend: "newton-cubic",
     initialView: { center: [0, 0], scale: 4 },
+    preview: {
+      view: { center: [0, 0], scale: 4 },
+      iterations: 70,
+      palette: 0,
+      colorDensity: 0.075,
+    },
     suggestedIterations: 80,
     iterationControl: { label: "Итерации", min: 10, max: 300, step: 5 },
     parameters: [
@@ -164,6 +200,12 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     renderer: "root-basin",
     basinBackend: "nova-cubic",
     initialView: { center: [0, 0], scale: 3.6 },
+    preview: {
+      view: { center: [0, 0], scale: 3.6 },
+      iterations: 100,
+      palette: 0,
+      colorDensity: 0.075,
+    },
     suggestedIterations: 120,
     iterationControl: { label: "Итерации", min: 20, max: 500, step: 5 },
     parameters: [
@@ -206,6 +248,15 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     renderer: "point-attractor",
     attractorBackend: "clifford",
     initialView: { center: [0, 0], scale: 4.8 },
+    preview: {
+      view: { center: [0, 0], scale: 4.8 },
+      palette: 0,
+      parameters: {
+        pointCount: 180000,
+        exposure: 0.11,
+        pointSize: 1.25,
+      },
+    },
     suggestedIterations: 1,
     parameters: [
       {
