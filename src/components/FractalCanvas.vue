@@ -16,6 +16,7 @@ import { BasinRenderer } from "../renderer/basin-renderer.ts";
 import { CliffordRenderer } from "../renderer/clifford-renderer.ts";
 import { DeepZoomRenderer } from "../renderer/deep-zoom-renderer.ts";
 import { FractalRenderer } from "../renderer/fractal-renderer.ts";
+import { GeometricIfsRenderer } from "../renderer/geometric-ifs-renderer.ts";
 import { useFractalStore } from "../stores/fractal.ts";
 
 const store = useFractalStore();
@@ -79,6 +80,7 @@ const attractorLabel = computed(() => {
 let escapeRenderer: FractalRenderer | undefined;
 let basinRenderer: BasinRenderer | undefined;
 let cliffordRenderer: CliffordRenderer | undefined;
+let geometricIfsRenderer: GeometricIfsRenderer | undefined;
 let deepRenderer: DeepZoomRenderer | undefined;
 let referenceOrbit: ReferenceOrbitResult | undefined;
 let referenceOrbitSignature = "";
@@ -176,6 +178,7 @@ function initializeRenderer(): void {
     escapeRenderer = new FractalRenderer(canvas.value);
     basinRenderer = new BasinRenderer(canvas.value);
     cliffordRenderer = new CliffordRenderer(canvas.value);
+    geometricIfsRenderer = new GeometricIfsRenderer(canvas.value);
     configureActiveRenderer();
     try {
       deepRenderer = new DeepZoomRenderer(canvas.value);
@@ -200,6 +203,7 @@ function handleContextLost(event: Event): void {
   escapeRenderer = undefined;
   basinRenderer = undefined;
   cliffordRenderer = undefined;
+  geometricIfsRenderer = undefined;
   deepRenderer = undefined;
   referenceOrbit = undefined;
   referenceOrbitClient.cancel();
@@ -213,6 +217,8 @@ function configureActiveRenderer(): void {
     escapeRenderer?.setFormula(formula);
   } else if (formula.renderer === "root-basin") {
     basinRenderer?.setFormula(formula);
+  } else if (formula.renderer === "geometric-ifs") {
+    geometricIfsRenderer?.setFormula(formula);
   }
 }
 
@@ -220,10 +226,12 @@ function disposeRenderers(): void {
   escapeRenderer?.dispose();
   basinRenderer?.dispose();
   cliffordRenderer?.dispose();
+  geometricIfsRenderer?.dispose();
   deepRenderer?.dispose();
   escapeRenderer = undefined;
   basinRenderer = undefined;
   cliffordRenderer = undefined;
+  geometricIfsRenderer = undefined;
   deepRenderer = undefined;
 }
 
@@ -415,6 +423,17 @@ function scheduleRender(): void {
           exposure: numberParameter("exposure", 0.045),
           pointSize: numberParameter("pointSize", 1.25),
           pointFraction: quality * quality,
+        });
+      } else if (formula.renderer === "geometric-ifs" && geometricIfsRenderer) {
+        geometricIfsRenderer.resize(quality);
+        geometricIfsRenderer.render({
+          center: store.center,
+          scale: store.scale,
+          recursionDepthMode: store.recursionDepthMode,
+          recursionDepth: store.recursionDepth,
+          coloring: store.geometricColoring,
+          palette: store.palette,
+          colorOffset: store.colorOffset,
         });
       }
     } catch (error) {

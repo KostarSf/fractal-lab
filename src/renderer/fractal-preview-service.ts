@@ -1,12 +1,18 @@
 import { CliffordTrajectoryClient } from "../attractors/clifford-client.ts";
 import { createDefaultParameters } from "../fractals/formulas.ts";
-import type { FractalFormula, FractalParameterValue } from "../fractals/types.ts";
+import type {
+  EscapeTimeFormula,
+  FractalFormula,
+  FractalParameterValue,
+  RootBasinFormula,
+} from "../fractals/types.ts";
 import { BasinRenderer } from "./basin-renderer.ts";
 import { CliffordRenderer } from "./clifford-renderer.ts";
 import { FractalRenderer, type RenderState } from "./fractal-renderer.ts";
+import { GeometricIfsRenderer } from "./geometric-ifs-renderer.ts";
 
-const PREVIEW_CACHE_NAME = "fractal-lab-previews-v4";
-const PREVIEW_CACHE_VERSION = "renderer-v4";
+const PREVIEW_CACHE_NAME = "fractal-lab-previews-v5";
+const PREVIEW_CACHE_VERSION = "renderer-v5";
 const PREVIEW_WIDTH = 480;
 const PREVIEW_HEIGHT = 300;
 
@@ -18,6 +24,8 @@ let escapeCanvas: HTMLCanvasElement | undefined;
 let escapeRenderer: FractalRenderer | undefined;
 let basinCanvas: HTMLCanvasElement | undefined;
 let basinRenderer: BasinRenderer | undefined;
+let geometricCanvas: HTMLCanvasElement | undefined;
+let geometricRenderer: GeometricIfsRenderer | undefined;
 let cliffordCanvas: HTMLCanvasElement | undefined;
 let cliffordRenderer: CliffordRenderer | undefined;
 let cliffordClient: CliffordTrajectoryClient | undefined;
@@ -94,6 +102,21 @@ async function renderPreview(formula: FractalFormula): Promise<Blob> {
     return canvasToBlob(canvas);
   }
 
+  if (formula.renderer === "geometric-ifs") {
+    const { canvas, renderer } = getGeometricRenderer();
+    renderer.setFormula(formula);
+    renderer.render({
+      center: formula.preview.view.center,
+      scale: formula.preview.view.scale,
+      recursionDepthMode: "manual",
+      recursionDepth: formula.preview.recursionDepth ?? formula.geometricIfs.defaultDepth,
+      coloring: formula.preview.geometricColoring ?? formula.geometricIfs.defaultColoring,
+      palette: formula.preview.palette ?? 0,
+      colorOffset: formula.preview.colorOffset ?? 0,
+    });
+    return canvasToBlob(canvas);
+  }
+
   const { canvas, renderer, client } = getCliffordRenderer();
   const result = await client.request({
     a: numberParameter(parameters, "a", -1.4),
@@ -117,7 +140,7 @@ async function renderPreview(formula: FractalFormula): Promise<Blob> {
 }
 
 function createPixelRenderState(
-  formula: FractalFormula,
+  formula: EscapeTimeFormula | RootBasinFormula,
   parameters: Readonly<Record<string, FractalParameterValue>>,
 ): RenderState {
   return {
@@ -130,6 +153,17 @@ function createPixelRenderState(
     smoothColors: true,
     parameters,
   };
+}
+
+function getGeometricRenderer(): {
+  canvas: HTMLCanvasElement;
+  renderer: GeometricIfsRenderer;
+} {
+  if (!geometricCanvas || !geometricRenderer) {
+    geometricCanvas = createPreviewCanvas();
+    geometricRenderer = new GeometricIfsRenderer(geometricCanvas);
+  }
+  return { canvas: geometricCanvas, renderer: geometricRenderer };
 }
 
 function getEscapeRenderer(): { canvas: HTMLCanvasElement; renderer: FractalRenderer } {

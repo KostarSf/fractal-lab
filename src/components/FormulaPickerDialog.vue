@@ -62,6 +62,9 @@ function categoryLabel(formula: FractalFormula): string {
   if (formula.renderer === "point-attractor") {
     return "Attractor";
   }
+  if (formula.renderer === "geometric-ifs") {
+    return "Geometric IFS";
+  }
   return "Escape time";
 }
 </script>
@@ -80,7 +83,7 @@ function categoryLabel(formula: FractalFormula): string {
         <header class="picker-header">
           <div class="picker-heading">
             <h2 id="formula-picker-title">Каталог фракталов</h2>
-            <p>Формулы, бассейны и странные аттракторы</p>
+            <p>Формулы, геометрические IFS, бассейны и странные аттракторы</p>
           </div>
 
           <button class="picker-close" type="button" aria-label="Закрыть" @click="closeDialog">
@@ -113,6 +116,7 @@ function categoryLabel(formula: FractalFormula): string {
                 ['escape-time', 'Escape'],
                 ['root-basin', 'Basins'],
                 ['point-attractor', 'Attractors'],
+                ['geometric-ifs', 'IFS'],
               ] as const"
               :key="filter[0]"
               type="button"

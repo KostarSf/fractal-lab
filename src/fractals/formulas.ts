@@ -1,4 +1,5 @@
 import type { FractalFormula, FractalParameterValue } from "./types.ts";
+import { GEOMETRIC_IFS_FORMULAS } from "../geometric-ifs/presets.ts";
 
 export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
   {
@@ -362,6 +363,7 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
       },
     ],
   },
+  ...GEOMETRIC_IFS_FORMULAS,
 ];
 
 export function createDefaultParameters(

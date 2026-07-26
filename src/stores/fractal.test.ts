@@ -73,6 +73,30 @@ describe("fractal store", () => {
     });
   });
 
+  it("keeps geometric recursion separate from escape-time iterations", () => {
+    const store = useFractalStore();
+
+    store.selectFormula("sierpinski-carpet");
+
+    expect(store.activeFormula.renderer).toBe("geometric-ifs");
+    expect(store.recursionDepthMode).toBe("auto");
+    expect(store.recursionDepth).toBe(7);
+    expect(store.geometricColoring).toBe("level");
+    expect(store.maxIterations).toBe(1);
+
+    store.setRecursionDepth(100);
+    expect(store.recursionDepth).toBe(15);
+  });
+
+  it("limits geometric zoom to the registered shader depth", () => {
+    const store = useFractalStore();
+    store.selectFormula("sierpinski-carpet");
+
+    store.setCamera([0, 0], 1e-30);
+
+    expect(store.magnification).toBeCloseTo(3 ** 15, 6);
+  });
+
   it("clamps numeric formula parameters to their declared range", () => {
     const store = useFractalStore();
     store.selectFormula("clifford");

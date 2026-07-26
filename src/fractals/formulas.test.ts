@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { createBasinFragmentShader } from "../renderer/basin-shader.ts";
+import { GEOMETRIC_IFS_FRAGMENT_SHADER } from "../renderer/geometric-ifs-shader.ts";
 import { createDefaultParameters, FRACTAL_FORMULAS } from "./formulas.ts";
 import { createFragmentShader } from "./shader.ts";
 
@@ -14,9 +15,9 @@ describe("fractal formula registry", () => {
     }
   });
 
-  it("registers escape-time, root-basin and point-attractor backends", () => {
+  it("registers every renderer backend", () => {
     expect(new Set(FRACTAL_FORMULAS.map((formula) => formula.renderer))).toEqual(
-      new Set(["escape-time", "root-basin", "point-attractor"]),
+      new Set(["escape-time", "root-basin", "point-attractor", "geometric-ifs"]),
     );
     expect(FRACTAL_FORMULAS.find((formula) => formula.id === "newton")).toMatchObject({
       renderer: "root-basin",
@@ -30,6 +31,9 @@ describe("fractal formula registry", () => {
       renderer: "point-attractor",
       attractorBackend: "clifford",
     });
+    expect(FRACTAL_FORMULAS.filter((formula) => formula.renderer === "geometric-ifs")).toHaveLength(
+      4,
+    );
     expect(FRACTAL_FORMULAS.find((formula) => formula.id === "mandelbrot")).toMatchObject({
       deepZoom: {
         backend: "mandelbrot-perturbation",
@@ -58,9 +62,16 @@ describe("fractal formula registry", () => {
       const shader =
         formula.renderer === "escape-time"
           ? createFragmentShader(formula)
-          : createBasinFragmentShader(formula);
+          : formula.renderer === "root-basin"
+            ? createBasinFragmentShader(formula)
+            : GEOMETRIC_IFS_FRAGMENT_SHADER;
 
       expect(shader).toContain("#version 300 es");
+      if (formula.renderer === "geometric-ifs") {
+        expect(shader).toContain("uniform int u_recursionDepth;");
+        expect(shader).toContain("uniform int u_gridMask[16];");
+        continue;
+      }
       expect(shader).toContain("uniform bool u_smoothColors;");
       expect(shader).toContain("if (u_smoothColors)");
 

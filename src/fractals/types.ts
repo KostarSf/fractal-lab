@@ -15,6 +15,8 @@ export interface IterationControl {
 export interface FractalPreview {
   readonly view: FractalView;
   readonly iterations?: number;
+  readonly recursionDepth?: number;
+  readonly geometricColoring?: GeometricColoring;
   readonly palette?: number;
   readonly colorDensity?: number;
   readonly colorOffset?: number;
@@ -57,13 +59,13 @@ interface FractalFormulaBase {
   readonly description: string;
   readonly initialView: FractalView;
   readonly preview: FractalPreview;
-  readonly suggestedIterations: number;
   readonly iterationControl?: IterationControl;
   readonly parameters: readonly FractalParameter[];
 }
 
 export interface EscapeTimeFormula extends FractalFormulaBase {
   readonly renderer: "escape-time";
+  readonly suggestedIterations: number;
   readonly escapePower: number;
   readonly deepZoom?: {
     readonly backend: DeepZoomBackendId;
@@ -87,12 +89,72 @@ export interface EscapeTimeFormula extends FractalFormulaBase {
 
 export interface RootBasinFormula extends FractalFormulaBase {
   readonly renderer: "root-basin";
+  readonly suggestedIterations: number;
   readonly basinBackend: "newton-cubic" | "nova-cubic";
 }
 
 export interface PointAttractorFormula extends FractalFormulaBase {
   readonly renderer: "point-attractor";
+  readonly suggestedIterations: number;
   readonly attractorBackend: "clifford";
 }
 
-export type FractalFormula = EscapeTimeFormula | RootBasinFormula | PointAttractorFormula;
+export type GeometricColoring = "solid" | "level" | "gradient";
+export type RecursionDepthMode = "auto" | "manual";
+
+export interface AffineTransform {
+  /**
+   * Row-major linear part of an affine transform in the normalized base area.
+   */
+  readonly matrix: readonly [a: number, b: number, c: number, d: number];
+  readonly translate: ComplexValue;
+}
+
+export interface RectangleBaseArea {
+  readonly shape: "rectangle";
+  readonly size: readonly [width: number, height: number];
+}
+
+export interface TriangleBaseArea {
+  readonly shape: "triangle";
+  readonly vertices: readonly [ComplexValue, ComplexValue, ComplexValue];
+}
+
+export interface GridIfsRule {
+  readonly backend: "grid";
+  readonly baseArea: RectangleBaseArea;
+  readonly grid: {
+    readonly columns: number;
+    readonly rows: number;
+    /** Row-major from the lower-left cell. */
+    readonly mask: readonly boolean[];
+  };
+  readonly transforms: readonly AffineTransform[];
+  readonly contractionRatio: number;
+  readonly recommendedMaxDepth: number;
+  readonly defaultDepth: number;
+  readonly defaultColoring: GeometricColoring;
+}
+
+export interface TriangleIfsRule {
+  readonly backend: "triangle-corners";
+  readonly baseArea: TriangleBaseArea;
+  readonly transforms: readonly AffineTransform[];
+  readonly contractionRatio: number;
+  readonly recommendedMaxDepth: number;
+  readonly defaultDepth: number;
+  readonly defaultColoring: GeometricColoring;
+}
+
+export type GeometricIfsRule = GridIfsRule | TriangleIfsRule;
+
+export interface GeometricIfsFormula extends FractalFormulaBase {
+  readonly renderer: "geometric-ifs";
+  readonly geometricIfs: GeometricIfsRule;
+}
+
+export type FractalFormula =
+  | EscapeTimeFormula
+  | RootBasinFormula
+  | PointAttractorFormula
+  | GeometricIfsFormula;

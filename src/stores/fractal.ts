@@ -1,6 +1,12 @@
 import { defineStore } from "pinia";
 import { createDefaultParameters, FRACTAL_FORMULAS } from "../fractals/formulas.ts";
-import type { ComplexValue, FractalParameterValue } from "../fractals/types.ts";
+import type {
+  ComplexValue,
+  FractalFormula,
+  FractalParameterValue,
+  GeometricColoring,
+  RecursionDepthMode,
+} from "../fractals/types.ts";
 import {
   approximateCamera,
   clampCameraScale,
@@ -24,6 +30,9 @@ interface FractalState {
   colorDensity: number;
   colorOffset: number;
   smoothColors: boolean;
+  recursionDepthMode: RecursionDepthMode;
+  recursionDepth: number;
+  geometricColoring: GeometricColoring;
   parameterValues: Record<string, FractalParameterValue>;
 }
 
@@ -41,7 +50,17 @@ function minimumScaleForFormula(formulaId: string): string {
   if (formula.renderer === "escape-time" && formula.deepZoom?.maxMagnification !== undefined) {
     return String(formula.initialView.scale / formula.deepZoom.maxMagnification);
   }
+  if (formula.renderer === "geometric-ifs") {
+    return String(
+      formula.initialView.scale *
+        formula.geometricIfs.contractionRatio ** formula.geometricIfs.recommendedMaxDepth,
+    );
+  }
   return MIN_CAMERA_SCALE;
+}
+
+function iterationsForFormula(formula: FractalFormula): number {
+  return formula.renderer === "geometric-ifs" ? 1 : formula.suggestedIterations;
 }
 
 function applyCamera(state: FractalState, camera: SerializedCamera): void {
@@ -63,11 +82,14 @@ export const useFractalStore = defineStore("fractal", {
       scale: approximate.scale,
       exactCenter: [camera.center[0], camera.center[1]],
       exactScale: camera.scale,
-      maxIterations: DEFAULT_FORMULA.suggestedIterations,
+      maxIterations: iterationsForFormula(DEFAULT_FORMULA),
       palette: 0,
       colorDensity: 0.075,
       colorOffset: 0,
       smoothColors: true,
+      recursionDepthMode: "auto",
+      recursionDepth: 8,
+      geometricColoring: "level",
       parameterValues: createDefaultParameters(DEFAULT_FORMULA),
     };
   },
@@ -82,8 +104,13 @@ export const useFractalStore = defineStore("fractal", {
       const formula = findFormula(formulaId);
       this.activeFormulaId = formula.id;
       applyCamera(this, cameraForFormula(formula.id));
-      this.maxIterations = formula.suggestedIterations;
+      this.maxIterations = iterationsForFormula(formula);
       this.parameterValues = createDefaultParameters(formula);
+      if (formula.renderer === "geometric-ifs") {
+        this.recursionDepthMode = "auto";
+        this.recursionDepth = formula.geometricIfs.defaultDepth;
+        this.geometricColoring = formula.geometricIfs.defaultColoring;
+      }
     },
 
     resetCamera(): void {
@@ -168,6 +195,13 @@ export const useFractalStore = defineStore("fractal", {
         );
       }
       this.parameterValues = { ...this.parameterValues, [key]: nextValue };
+    },
+
+    setRecursionDepth(depth: number): void {
+      const formula = this.activeFormula;
+      const maxDepth =
+        formula.renderer === "geometric-ifs" ? formula.geometricIfs.recommendedMaxDepth : 32;
+      this.recursionDepth = Math.max(1, Math.min(maxDepth, Math.trunc(depth)));
     },
   },
 });

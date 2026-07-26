@@ -5,14 +5,32 @@ import { useFractalStore } from "../stores/fractal.ts";
 import FormulaPickerDialog from "./FormulaPickerDialog.vue";
 
 const store = useFractalStore();
-const { activeFormula, colorDensity, maxIterations, palette, parameterValues, smoothColors } =
-  storeToRefs(store);
+const {
+  activeFormula,
+  colorDensity,
+  geometricColoring,
+  maxIterations,
+  palette,
+  parameterValues,
+  recursionDepth,
+  recursionDepthMode,
+  smoothColors,
+} = storeToRefs(store);
+const geometricMode = computed(() => activeFormula.value.renderer === "geometric-ifs");
+const maxRecursionDepth = computed(() =>
+  activeFormula.value.renderer === "geometric-ifs"
+    ? activeFormula.value.geometricIfs.recommendedMaxDepth
+    : 32,
+);
 const rendererLabel = computed(() => {
   if (activeFormula.value.renderer === "root-basin") {
     return "GPU root-basin renderer";
   }
   if (activeFormula.value.renderer === "point-attractor") {
     return "Worker + GPU point renderer";
+  }
+  if (activeFormula.value.renderer === "geometric-ifs") {
+    return "GPU geometric IFS renderer";
   }
   return "GPU escape-time renderer";
 });
@@ -169,7 +187,45 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
 
       <div class="section-rule"></div>
 
-      <label v-if="activeFormula.iterationControl" class="field range-field">
+      <template v-if="geometricMode">
+        <label class="field">
+          <span>Глубина рекурсии</span>
+          <span class="select-wrap">
+            <select v-model="recursionDepthMode">
+              <option value="auto">Auto · по масштабу</option>
+              <option value="manual">Manual · фиксированная</option>
+            </select>
+          </span>
+        </label>
+
+        <label v-if="recursionDepthMode === 'manual'" class="field range-field">
+          <span>
+            <span>Количество уровней</span>
+            <output for="recursion-depth">{{ recursionDepth }}</output>
+          </span>
+          <input
+            id="recursion-depth"
+            v-model.number="recursionDepth"
+            type="range"
+            min="1"
+            :max="maxRecursionDepth"
+            step="1"
+          />
+        </label>
+
+        <label class="field">
+          <span>Окрашивание</span>
+          <span class="select-wrap">
+            <select v-model="geometricColoring">
+              <option value="solid">Однотонное</option>
+              <option value="level">По уровню</option>
+              <option value="gradient">Градиент</option>
+            </select>
+          </span>
+        </label>
+      </template>
+
+      <label v-else-if="activeFormula.iterationControl" class="field range-field">
         <span>
           <span>{{ activeFormula.iterationControl.label }}</span>
           <output for="iterations">{{ maxIterations }}</output>
@@ -196,7 +252,10 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
         </span>
       </label>
 
-      <label v-if="activeFormula.renderer !== 'point-attractor'" class="toggle-field">
+      <label
+        v-if="activeFormula.renderer === 'escape-time' || activeFormula.renderer === 'root-basin'"
+        class="toggle-field"
+      >
         <span>
           <span>Сглаживание</span>
           <small>Плавные переходы между итерациями</small>
@@ -204,7 +263,10 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
         <input v-model="smoothColors" type="checkbox" role="switch" aria-label="Сглаживать цвета" />
       </label>
 
-      <label v-if="activeFormula.renderer !== 'point-attractor'" class="field range-field">
+      <label
+        v-if="activeFormula.renderer === 'escape-time' || activeFormula.renderer === 'root-basin'"
+        class="field range-field"
+      >
         <span>
           <span>Плотность цвета</span>
           <output for="color-density">{{ colorDensity.toFixed(3) }}</output>
