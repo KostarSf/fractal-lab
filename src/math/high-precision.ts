@@ -49,6 +49,21 @@ export function createSerializedCamera(center: ComplexValue, scale: number): Ser
   };
 }
 
+export function clampCameraScale(
+  camera: SerializedCamera,
+  minimumScale: DecimalString = MIN_CAMERA_SCALE,
+): SerializedCamera {
+  const D = decimalContext(camera.scale);
+  const precision = precisionForScale(camera.scale);
+  const safeMinimum = D.min(MAX_CAMERA_SCALE, D.max(MIN_CAMERA_SCALE, new D(minimumScale)));
+  const scale = D.max(safeMinimum, D.min(MAX_CAMERA_SCALE, new D(camera.scale)));
+
+  return {
+    center: camera.center,
+    scale: serialize(scale, precision),
+  };
+}
+
 export function approximateCamera(camera: SerializedCamera): {
   readonly center: [number, number];
   readonly scale: number;
@@ -91,6 +106,7 @@ export function transformCamera(
   previousNormalized: ComplexValue,
   nextNormalized: ComplexValue,
   scaleFactor: number,
+  minimumScale: DecimalString = MIN_CAMERA_SCALE,
 ): SerializedCamera {
   if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
     return camera;
@@ -99,8 +115,9 @@ export function transformCamera(
   const D = decimalContext(camera.scale);
   const precision = precisionForScale(camera.scale);
   const currentScale = new D(camera.scale);
+  const safeMinimum = D.min(MAX_CAMERA_SCALE, D.max(MIN_CAMERA_SCALE, new D(minimumScale)));
   let nextScale = currentScale.times(scaleFactor.toString());
-  nextScale = D.max(MIN_CAMERA_SCALE, D.min(MAX_CAMERA_SCALE, nextScale));
+  nextScale = D.max(safeMinimum, D.min(MAX_CAMERA_SCALE, nextScale));
 
   const nextCenter = ([0, 1] as const).map((component) => {
     const anchor = new D(camera.center[component]).plus(

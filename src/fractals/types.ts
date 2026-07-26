@@ -60,6 +60,7 @@ export interface EscapeTimeFormula extends FractalFormulaBase {
   readonly escapePower: number;
   readonly deepZoom?: {
     readonly backend: "mandelbrot-perturbation";
+    readonly maxMagnification?: number;
   };
   readonly shader: {
     /**

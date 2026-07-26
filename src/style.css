@@ -215,6 +215,16 @@ input[type="range"] {
   box-shadow: 0 0 8px rgb(124 205 162 / 50%);
 }
 
+.deep-zoom-status[data-limit="true"] {
+  border-color: rgb(229 191 111 / 24%);
+  color: rgb(244 215 153 / 76%);
+}
+
+.deep-zoom-status[data-limit="true"] i {
+  background: #e5bf6f;
+  box-shadow: 0 0 8px rgb(229 191 111 / 52%);
+}
+
 .deep-zoom-status[data-state="error"] {
   border-color: rgb(255 117 117 / 22%);
   color: #ffb0b0;

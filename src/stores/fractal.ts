@@ -3,7 +3,9 @@ import { createDefaultParameters, FRACTAL_FORMULAS } from "../fractals/formulas.
 import type { ComplexValue, FractalParameterValue } from "../fractals/types.ts";
 import {
   approximateCamera,
+  clampCameraScale,
   createSerializedCamera,
+  MIN_CAMERA_SCALE,
   transformCamera,
   translateCamera,
   type SerializedCamera,
@@ -34,12 +36,21 @@ function cameraForFormula(formulaId: string): SerializedCamera {
   return createSerializedCamera(view.center, view.scale);
 }
 
+function minimumScaleForFormula(formulaId: string): string {
+  const formula = findFormula(formulaId);
+  if (formula.renderer === "escape-time" && formula.deepZoom?.maxMagnification !== undefined) {
+    return String(formula.initialView.scale / formula.deepZoom.maxMagnification);
+  }
+  return MIN_CAMERA_SCALE;
+}
+
 function applyCamera(state: FractalState, camera: SerializedCamera): void {
-  const approximate = approximateCamera(camera);
+  const constrainedCamera = clampCameraScale(camera, minimumScaleForFormula(state.activeFormulaId));
+  const approximate = approximateCamera(constrainedCamera);
   state.center = approximate.center;
   state.scale = approximate.scale;
-  state.exactCenter = [camera.center[0], camera.center[1]];
-  state.exactScale = camera.scale;
+  state.exactCenter = [constrainedCamera.center[0], constrainedCamera.center[1]];
+  state.exactScale = constrainedCamera.scale;
 }
 
 export const useFractalStore = defineStore("fractal", {
@@ -120,18 +131,27 @@ export const useFractalStore = defineStore("fractal", {
       nextNormalized: ComplexValue,
       scaleFactor: number,
     ): void {
-      applyCamera(
-        this,
-        transformCamera(
-          {
-            center: this.exactCenter,
-            scale: this.exactScale,
-          },
-          previousNormalized,
-          nextNormalized,
-          scaleFactor,
-        ),
+      const camera = {
+        center: this.exactCenter,
+        scale: this.exactScale,
+      } satisfies SerializedCamera;
+      const nextCamera = transformCamera(
+        camera,
+        previousNormalized,
+        nextNormalized,
+        scaleFactor,
+        minimumScaleForFormula(this.activeFormulaId),
       );
+
+      if (
+        nextCamera.center[0] === camera.center[0] &&
+        nextCamera.center[1] === camera.center[1] &&
+        nextCamera.scale === camera.scale
+      ) {
+        return;
+      }
+
+      applyCamera(this, nextCamera);
     },
 
     zoomFromCenter(factor: number): void {

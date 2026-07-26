@@ -29,6 +29,22 @@ describe("high precision camera", () => {
     expect(transformed.scale).toBe("1.55");
   });
 
+  it("supports a formula-specific minimum scale", () => {
+    const camera = {
+      center: ["-0.743643887037151", "0.13182590420533"],
+      scale: "6.2e-35",
+    } as const;
+    const transformed = transformCamera(camera, [0.2, -0.1], [0.2, -0.1], 0.01, "3.1e-35");
+
+    expect(Number(transformed.scale)).toBe(3.1e-35);
+    expect(
+      decimalDifferenceToNumber(transformed.center[0], camera.center[0], transformed.scale),
+    ).toBeCloseTo(6.2e-36, 45);
+    expect(
+      decimalDifferenceToNumber(transformed.center[1], camera.center[1], transformed.scale),
+    ).toBeCloseTo(-3.1e-36, 45);
+  });
+
   it("calculates tiny deltas relative to a reference center", () => {
     expect(
       decimalDifferenceToNumber(

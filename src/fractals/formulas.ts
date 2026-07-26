@@ -16,7 +16,10 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     suggestedIterations: 320,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
-    deepZoom: { backend: "mandelbrot-perturbation" },
+    deepZoom: {
+      backend: "mandelbrot-perturbation",
+      maxMagnification: 1e35,
+    },
     parameters: [],
     shader: {
       setup: `

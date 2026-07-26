@@ -26,11 +26,20 @@ describe("fractal store", () => {
     const store = useFractalStore();
 
     store.setCamera([1, -1], 1e-100);
-    expect(store.scale).toBe(1e-35);
+    expect(store.scale).toBe(3.1e-35);
+    expect(store.magnification).toBe(1e35);
+
+    store.zoomFromCenter(0.1);
+    expect(store.scale).toBe(3.1e-35);
+    expect(store.magnification).toBe(1e35);
 
     store.setCamera([1, -1], 7);
     store.zoomFromCenter(2);
     expect(store.scale).toBe(8);
+
+    store.selectFormula("julia");
+    store.setCamera([1, -1], 1e-100);
+    expect(store.scale).toBe(1e-35);
   });
 
   it("updates parameters immutably", () => {

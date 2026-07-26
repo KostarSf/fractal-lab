@@ -30,6 +30,12 @@ describe("fractal formula registry", () => {
       renderer: "point-attractor",
       attractorBackend: "clifford",
     });
+    expect(FRACTAL_FORMULAS.find((formula) => formula.id === "mandelbrot")).toMatchObject({
+      deepZoom: {
+        backend: "mandelbrot-perturbation",
+        maxMagnification: 1e35,
+      },
+    });
   });
 
   it("generates complete shaders for pixel-based formulas", () => {

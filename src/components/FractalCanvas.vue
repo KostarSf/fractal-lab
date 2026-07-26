@@ -35,12 +35,24 @@ const deepZoomMode = computed(() => {
     shouldUseDeepZoom(store.magnification)
   );
 });
+const deepZoomLimitReached = computed(() => {
+  const formula = store.activeFormula;
+  const limit = formula.renderer === "escape-time" ? formula.deepZoom?.maxMagnification : undefined;
+  return limit !== undefined && store.magnification >= limit * (1 - 1e-12);
+});
 const attractorMode = computed(() => store.activeFormula.renderer === "point-attractor");
 const deepZoomLabel = computed(() => {
   if (deepZoomStatus.value === "preparing") {
     return "Подготовка опорной орбиты…";
   }
   if (deepZoomStatus.value === "ready") {
+    const limit =
+      store.activeFormula.renderer === "escape-time"
+        ? store.activeFormula.deepZoom?.maxMagnification
+        : undefined;
+    if (deepZoomLimitReached.value && limit !== undefined) {
+      return `Deep zoom · предел ${limit.toExponential(2)}×`;
+    }
     return `Deep zoom · ${deepZoomPrecision.value} digits`;
   }
   if (deepZoomStatus.value === "error") {
@@ -579,7 +591,13 @@ function getGestureMetrics():
     <span>{{ errorMessage }}</span>
   </div>
 
-  <div v-if="deepZoomMode" class="deep-zoom-status" :data-state="deepZoomStatus" role="status">
+  <div
+    v-if="deepZoomMode"
+    class="deep-zoom-status"
+    :data-state="deepZoomStatus"
+    :data-limit="deepZoomLimitReached"
+    role="status"
+  >
     <i aria-hidden="true"></i>
     <span>{{ deepZoomLabel }}</span>
   </div>
