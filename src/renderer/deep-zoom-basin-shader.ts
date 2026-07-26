@@ -28,7 +28,42 @@ function iterationCode(backend: RootBasinDeepZoomBackendId): string {
   float deltaExponent = INITIAL_DELTA_EXPONENT;
   normalizeExtendedDelta(deltaMantissa, deltaExponent);
   vec2 deltaCurrent = materializeExtendedDelta(deltaMantissa, deltaExponent);
-  vec2 actualZ = addReference(fetchReference(0), deltaCurrent);
+  vec4 referenceStart = fetchReference(0);
+  vec2 actualZ = addReference(referenceStart, deltaCurrent);
+  bool useDirectExtendedOrbit =
+    u_scale < 1e-16 &&
+    maxNorm(combineReference(referenceStart)) <= 4.0 * u_scale;
+  vec2 directMantissa = vec2(0.0);
+  float directExponent = 0.0;
+  if (useDirectExtendedOrbit) {
+    directMantissa = referenceStart.xy;
+    normalizeExtendedDelta(directMantissa, directExponent);
+    vec2 directLowMantissa = referenceStart.zw;
+    float directLowExponent = 0.0;
+    normalizeExtendedDelta(directLowMantissa, directLowExponent);
+    vec2 combinedDirectMantissa;
+    float combinedDirectExponent;
+    addExtendedValues(
+      directMantissa,
+      directExponent,
+      directLowMantissa,
+      directLowExponent,
+      combinedDirectMantissa,
+      combinedDirectExponent
+    );
+    directMantissa = combinedDirectMantissa;
+    directExponent = combinedDirectExponent;
+    addExtendedValues(
+      directMantissa,
+      directExponent,
+      deltaMantissa,
+      deltaExponent,
+      combinedDirectMantissa,
+      combinedDirectExponent
+    );
+    directMantissa = combinedDirectMantissa;
+    directExponent = combinedDirectExponent;
+  }
   vec2 previousZ = actualZ;
   bool hasPreviousZ = false;
   int referenceIndex = 0;
@@ -44,25 +79,87 @@ function iterationCode(backend: RootBasinDeepZoomBackendId): string {
       break;
     }
 
+    if (useDirectExtendedOrbit) {
+      bool directIsMaterialized =
+        directExponent >= -62.0 &&
+        directExponent <= 120.0;
+      vec2 directCurrent = directIsMaterialized
+        ? materializeExtendedDelta(directMantissa, directExponent)
+        : vec2(0.0);
+      vec2 correction = vec2(1e20, 0.0);
+      bool hasCorrection =
+        directIsMaterialized &&
+        calculateNewtonCorrection(directCurrent, correction);
+      vec2 nextDirectMantissa;
+      float nextDirectExponent;
+      if (
+        !iterateExtendedNewton(
+          directMantissa,
+          directExponent,
+          nextDirectMantissa,
+          nextDirectExponent
+        )
+      ) {
+        break;
+      }
+
+      iteration = i;
+      finalMetric = hasCorrection
+        ? stableComplexMagnitude(correction)
+        : 1e20;
+      if (
+        hasCorrection &&
+        dot(correction, correction) <=
+          u_convergenceTolerance * u_convergenceTolerance
+      ) {
+        actualZ = materializeExtendedDelta(
+          nextDirectMantissa,
+          nextDirectExponent
+        );
+        rootIndex = nearestRoot(actualZ);
+        vec2 root = cubicRoot(rootIndex);
+        vec2 localError = directCurrent - root;
+        if (hasPreviousZ) {
+          localError = iterateNewtonLocalError(previousZ - root, root);
+        }
+        localError = iterateNewtonLocalError(localError, root);
+        finalMetric = stableComplexMagnitude(localError);
+        convergenceRefinementSteps = 1;
+        resultKind = 1;
+        break;
+      }
+
+      if (directIsMaterialized) {
+        previousZ = directCurrent;
+        hasPreviousZ = true;
+      }
+      directMantissa = nextDirectMantissa;
+      directExponent = nextDirectExponent;
+      continue;
+    }
+
     vec4 referenceCurrent = fetchReference(referenceIndex);
     vec2 actualCurrent = addReference(referenceCurrent, deltaCurrent);
-    vec2 zSquared = complexSquare(actualCurrent);
-    vec2 numerator = complexMultiply(zSquared, actualCurrent) - vec2(1.0, 0.0);
-    vec2 derivative = 3.0 * zSquared;
-    float derivativeSquared = dot(derivative, derivative);
-    if (derivativeSquared < 1e-20) {
+    vec2 correction;
+    if (!calculateNewtonCorrection(actualCurrent, correction)) {
       break;
     }
 
-    vec2 correction = complexDivide(numerator, derivative, derivativeSquared);
-    vec2 newtonFactor;
-    if (!calculateNewtonPerturbationFactor(referenceCurrent, deltaCurrent, newtonFactor)) {
+    vec2 nextDeltaMantissa;
+    float nextDeltaExponent;
+    if (
+      !calculateNextNewtonDelta(
+        referenceCurrent,
+        deltaCurrent,
+        deltaMantissa,
+        deltaExponent,
+        nextDeltaMantissa,
+        nextDeltaExponent
+      )
+    ) {
       break;
     }
 
-    vec2 nextDeltaMantissa = complexMultiply(deltaMantissa, newtonFactor);
-    float nextDeltaExponent = deltaExponent;
-    normalizeExtendedDelta(nextDeltaMantissa, nextDeltaExponent);
     vec2 nextDeltaCurrent = materializeExtendedDelta(
       nextDeltaMantissa,
       nextDeltaExponent
@@ -120,13 +217,6 @@ function iterationCode(backend: RootBasinDeepZoomBackendId): string {
 
     vec4 referenceCurrent = fetchReference(referenceIndex);
     vec2 actualCurrent = addReference(referenceCurrent, deltaCurrent);
-    vec2 zSquared = complexSquare(actualCurrent);
-    vec2 derivative = 3.0 * zSquared;
-    float derivativeSquared = dot(derivative, derivative);
-    if (derivativeSquared < 1e-20) {
-      break;
-    }
-
     vec2 correctionDelta;
     if (!calculateCorrectionDelta(referenceCurrent, deltaCurrent, correctionDelta)) {
       break;
@@ -297,38 +387,285 @@ bool stableComplexDivide(
   return !any(isnan(quotient)) && !any(isinf(quotient));
 }
 
-bool stableComplexDivideInPlace(
+bool divideFastOrStable(
+  vec2 numerator,
+  vec2 denominator,
+  out vec2 quotient
+) {
+  float denominatorSquared = dot(denominator, denominator);
+  if (
+    denominatorSquared >= 1e-20 &&
+    denominatorSquared <= 1e20
+  ) {
+    quotient = complexDivide(
+      numerator,
+      denominator,
+      denominatorSquared
+    );
+    return !any(isnan(quotient)) && !any(isinf(quotient));
+  }
+  return stableComplexDivide(numerator, denominator, quotient);
+}
+
+bool calculateNewtonCorrection(
+  vec2 value,
+  out vec2 correction
+) {
+  vec2 reciprocal;
+  if (!divideFastOrStable(vec2(1.0, 0.0), value, reciprocal)) {
+    return false;
+  }
+
+  vec2 reciprocalSquared = complexSquare(reciprocal);
+  correction = (value - reciprocalSquared) / 3.0;
+  return !any(isnan(correction)) && !any(isinf(correction));
+}
+
+bool divideFastOrStableInPlace(
   inout vec2 value,
   vec2 denominator
 ) {
   vec2 quotient;
-  if (!stableComplexDivide(value, denominator, quotient)) {
+  if (!divideFastOrStable(value, denominator, quotient)) {
     return false;
   }
   value = quotient;
   return true;
 }
 
-bool calculateNewtonPerturbationFactor(
-  vec4 packedReference,
-  vec2 delta,
-  out vec2 factor
+bool divideExtendedBy(
+  inout vec2 mantissa,
+  inout float exponent,
+  vec2 denominator
 ) {
-  vec2 reference = combineReference(packedReference);
-  vec2 actual = addReference(packedReference, delta);
-  vec2 reciprocalTerm = 2.0 * reference + delta;
+  float denominatorScale = maxNorm(denominator);
+  if (denominatorScale == 0.0) {
+    return false;
+  }
+  if (maxNorm(mantissa) == 0.0) {
+    return true;
+  }
 
-  if (
-    !stableComplexDivideInPlace(reciprocalTerm, reference) ||
-    !stableComplexDivideInPlace(reciprocalTerm, reference) ||
-    !stableComplexDivideInPlace(reciprocalTerm, actual) ||
-    !stableComplexDivideInPlace(reciprocalTerm, actual)
-  ) {
+  float denominatorExponent = floor(log2(denominatorScale));
+  float denominatorMantissaScale =
+    denominatorScale * exp2(-denominatorExponent);
+  vec2 normalizedDenominator =
+    (denominator / denominatorScale) * denominatorMantissaScale;
+  float denominatorSquared = dot(
+    normalizedDenominator,
+    normalizedDenominator
+  );
+  mantissa = complexDivide(
+    mantissa,
+    normalizedDenominator,
+    denominatorSquared
+  );
+  exponent -= denominatorExponent;
+  normalizeExtendedDelta(mantissa, exponent);
+  return !any(isnan(mantissa)) && !any(isinf(mantissa));
+}
+
+void addExtendedValues(
+  vec2 leftMantissa,
+  float leftExponent,
+  vec2 rightMantissa,
+  float rightExponent,
+  out vec2 resultMantissa,
+  out float resultExponent
+) {
+  resultExponent = max(leftExponent, rightExponent);
+  float leftShift = leftExponent - resultExponent;
+  float rightShift = rightExponent - resultExponent;
+  vec2 alignedLeft =
+    leftShift < -120.0
+      ? vec2(0.0)
+      : leftMantissa * exp2(leftShift);
+  vec2 alignedRight =
+    rightShift < -120.0
+      ? vec2(0.0)
+      : rightMantissa * exp2(rightShift);
+  resultMantissa = alignedLeft + alignedRight;
+  normalizeExtendedDelta(resultMantissa, resultExponent);
+}
+
+bool divideExtendedByExtended(
+  inout vec2 mantissa,
+  inout float exponent,
+  vec2 denominatorMantissa,
+  float denominatorExponent
+) {
+  if (!divideExtendedBy(mantissa, exponent, denominatorMantissa)) {
+    return false;
+  }
+  exponent -= denominatorExponent;
+  normalizeExtendedDelta(mantissa, exponent);
+  return !any(isnan(mantissa)) && !any(isinf(mantissa));
+}
+
+bool iterateExtendedNewton(
+  vec2 currentMantissa,
+  float currentExponent,
+  out vec2 nextMantissa,
+  out float nextExponent
+) {
+  if (maxNorm(currentMantissa) == 0.0) {
     return false;
   }
 
-  factor = (vec2(2.0, 0.0) - reciprocalTerm) / 3.0;
-  return !any(isnan(factor)) && !any(isinf(factor));
+  vec2 linearMantissa = currentMantissa * (2.0 / 3.0);
+  float linearExponent = currentExponent;
+  normalizeExtendedDelta(linearMantissa, linearExponent);
+  if (currentExponent > 10.0) {
+    nextMantissa = linearMantissa;
+    nextExponent = linearExponent;
+    return true;
+  }
+
+  vec2 reciprocalMantissa = vec2(1.0 / 3.0, 0.0);
+  float reciprocalExponent = 0.0;
+  if (
+    !divideExtendedByExtended(
+      reciprocalMantissa,
+      reciprocalExponent,
+      currentMantissa,
+      currentExponent
+    ) ||
+    !divideExtendedByExtended(
+      reciprocalMantissa,
+      reciprocalExponent,
+      currentMantissa,
+      currentExponent
+    )
+  ) {
+    return false;
+  }
+  if (currentExponent < -20.0) {
+    nextMantissa = reciprocalMantissa;
+    nextExponent = reciprocalExponent;
+    return true;
+  }
+
+  addExtendedValues(
+    linearMantissa,
+    linearExponent,
+    reciprocalMantissa,
+    reciprocalExponent,
+    nextMantissa,
+    nextExponent
+  );
+  return !any(isnan(nextMantissa)) && !any(isinf(nextMantissa));
+}
+
+bool calculateNextNewtonDelta(
+  vec4 packedReference,
+  vec2 delta,
+  vec2 deltaMantissa,
+  float deltaExponent,
+  out vec2 nextMantissa,
+  out float nextExponent
+) {
+  vec2 reference = combineReference(packedReference);
+  vec2 actual = addReference(packedReference, delta);
+  float referenceScale = maxNorm(reference);
+  float actualScale = maxNorm(actual);
+  if (referenceScale == 0.0 || actualScale == 0.0) {
+    return false;
+  }
+
+  if (
+    min(referenceScale, actualScale) >= 1e-3 &&
+    max(referenceScale, actualScale) <= 1e3
+  ) {
+    vec2 denominator = complexMultiply(
+      complexSquare(reference),
+      complexSquare(actual)
+    );
+    float denominatorSquared = dot(denominator, denominator);
+    vec2 reciprocalTerm = complexDivide(
+      2.0 * reference + delta,
+      denominator,
+      denominatorSquared
+    );
+    vec2 factor = (vec2(2.0, 0.0) - reciprocalTerm) / 3.0;
+    nextMantissa = complexMultiply(deltaMantissa, factor);
+    nextExponent = deltaExponent;
+    normalizeExtendedDelta(nextMantissa, nextExponent);
+    return !any(isnan(nextMantissa)) && !any(isinf(nextMantissa));
+  }
+
+  // Δ' = 2Δ/3 - Δ(2Z+Δ)/(3 Z²(Z+Δ)²). Keep both terms in
+  // mantissa/exponent form: near the pole the quotient can be larger than
+  // float while the represented orbit remains valid.
+  vec2 linearMantissa = deltaMantissa * (2.0 / 3.0);
+  float linearExponent = deltaExponent;
+  normalizeExtendedDelta(linearMantissa, linearExponent);
+
+  vec2 reciprocalMantissa = complexMultiply(
+    deltaMantissa,
+    2.0 * reference + delta
+  );
+  float reciprocalExponent = deltaExponent;
+  normalizeExtendedDelta(reciprocalMantissa, reciprocalExponent);
+  if (
+    !divideExtendedBy(reciprocalMantissa, reciprocalExponent, reference) ||
+    !divideExtendedBy(reciprocalMantissa, reciprocalExponent, reference) ||
+    !divideExtendedBy(reciprocalMantissa, reciprocalExponent, actual) ||
+    !divideExtendedBy(reciprocalMantissa, reciprocalExponent, actual)
+  ) {
+    return false;
+  }
+  reciprocalMantissa *= -1.0 / 3.0;
+  normalizeExtendedDelta(reciprocalMantissa, reciprocalExponent);
+
+  addExtendedValues(
+    linearMantissa,
+    linearExponent,
+    reciprocalMantissa,
+    reciprocalExponent,
+    nextMantissa,
+    nextExponent
+  );
+  return !any(isnan(nextMantissa)) && !any(isinf(nextMantissa));
+}
+
+bool calculateReciprocalPerturbationTerm(
+  vec4 packedReference,
+  vec2 delta,
+  out vec2 reciprocalTerm
+) {
+  vec2 reference = combineReference(packedReference);
+  vec2 actual = addReference(packedReference, delta);
+  vec2 numerator = 2.0 * reference + delta;
+  float referenceScale = maxNorm(reference);
+  float actualScale = maxNorm(actual);
+
+  if (
+    min(referenceScale, actualScale) >= 1e-3 &&
+    max(referenceScale, actualScale) <= 1e3
+  ) {
+    vec2 denominator = complexMultiply(
+      complexSquare(reference),
+      complexSquare(actual)
+    );
+    float denominatorSquared = dot(denominator, denominator);
+    reciprocalTerm = complexDivide(
+      numerator,
+      denominator,
+      denominatorSquared
+    );
+    return !any(isnan(reciprocalTerm)) && !any(isinf(reciprocalTerm));
+  }
+
+  reciprocalTerm = numerator;
+  if (
+    !divideFastOrStableInPlace(reciprocalTerm, reference) ||
+    !divideFastOrStableInPlace(reciprocalTerm, reference) ||
+    !divideFastOrStableInPlace(reciprocalTerm, actual) ||
+    !divideFastOrStableInPlace(reciprocalTerm, actual)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 bool calculateCorrectionDelta(
@@ -336,27 +673,14 @@ bool calculateCorrectionDelta(
   vec2 delta,
   out vec2 correctionDelta
 ) {
-  vec2 reference = combineReference(packedReference);
-  vec2 actual = addReference(packedReference, delta);
-  vec2 reciprocalNumerator = complexMultiply(
-    delta,
-    2.0 * reference + delta
-  );
-  vec2 reciprocalDenominator = complexMultiply(
-    complexSquare(reference),
-    complexSquare(actual)
-  );
-  float denominatorSquared = dot(reciprocalDenominator, reciprocalDenominator);
-  if (denominatorSquared < 1e-38) {
+  vec2 reciprocalTerm;
+  if (!calculateReciprocalPerturbationTerm(packedReference, delta, reciprocalTerm)) {
     return false;
   }
-
-  vec2 reciprocalDifference = complexDivide(
-    reciprocalNumerator,
-    reciprocalDenominator,
-    denominatorSquared
+  correctionDelta = complexMultiply(
+    delta,
+    (vec2(1.0, 0.0) + reciprocalTerm) / 3.0
   );
-  correctionDelta = (delta + reciprocalDifference) / 3.0;
   return !any(isnan(correctionDelta)) && !any(isinf(correctionDelta));
 }
 

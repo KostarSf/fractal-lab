@@ -99,6 +99,10 @@ describe("fractal formula registry", () => {
           expect(shader).toContain("convergenceRefinementSteps");
           expect(shader).toContain("stableComplexMagnitude(localError)");
         }
+        expect(shader).toContain("calculateNewtonCorrection(z, correction)");
+        expect(shader).toContain("correction = (value - reciprocalSquared) / 3.0;");
+        expect(shader).toContain("return stableComplexDivide(numerator, denominator, quotient);");
+        expect(shader).not.toContain("denominator < 1e-20");
         expect(shader).toContain("colorIteration * u_colorDensity");
         expect(shader).not.toContain("float convergence");
       }

@@ -30,15 +30,11 @@ function iterationCode(formula: RootBasinFormula): string {
     }
 
     vec2 zBeforeStep = z;
-    vec2 zSquared = complexSquare(z);
-    vec2 numerator = complexMultiply(zSquared, z) - vec2(1.0, 0.0);
-    vec2 derivative = 3.0 * zSquared;
-    float denominator = dot(derivative, derivative);
-    if (denominator < 1e-20) {
+    vec2 correction;
+    if (!calculateNewtonCorrection(z, correction)) {
       break;
     }
 
-    vec2 correction = complexDivide(numerator, derivative, denominator);
     float currentMetric = length(correction);
     z -= correction;
     iteration = i;
@@ -82,15 +78,11 @@ function iterationCode(formula: RootBasinFormula): string {
     }
 
     float previousMagnitude = length(z);
-    vec2 zSquared = complexSquare(z);
-    vec2 numerator = complexMultiply(zSquared, z) - vec2(1.0, 0.0);
-    vec2 derivative = 3.0 * zSquared;
-    float denominator = dot(derivative, derivative);
-    if (denominator < 1e-20) {
+    vec2 correction;
+    if (!calculateNewtonCorrection(z, correction)) {
       break;
     }
 
-    vec2 correction = complexDivide(numerator, derivative, denominator);
     vec2 nextZ = z - u_novaRelaxation * correction + c;
     vec2 delta = nextZ - z;
     z = nextZ;
@@ -172,6 +164,68 @@ vec2 complexDivide(vec2 numerator, vec2 denominator, float denominatorSquared) {
     dot(numerator, denominator),
     numerator.y * denominator.x - numerator.x * denominator.y
   ) / denominatorSquared;
+}
+
+bool stableComplexDivide(
+  vec2 numerator,
+  vec2 denominator,
+  out vec2 quotient
+) {
+  float denominatorScale = max(abs(denominator.x), abs(denominator.y));
+  if (denominatorScale == 0.0) {
+    return false;
+  }
+
+  vec2 normalizedDenominator = denominator / denominatorScale;
+  float denominatorSquared = dot(
+    normalizedDenominator,
+    normalizedDenominator
+  );
+  quotient =
+    complexDivide(
+      numerator,
+      normalizedDenominator,
+      denominatorSquared
+    ) /
+    denominatorScale;
+  return !any(isnan(quotient)) && !any(isinf(quotient));
+}
+
+bool divideFastOrStable(
+  vec2 numerator,
+  vec2 denominator,
+  out vec2 quotient
+) {
+  float denominatorSquared = dot(denominator, denominator);
+  if (
+    denominatorSquared >= 1e-20 &&
+    denominatorSquared <= 1e20
+  ) {
+    quotient = complexDivide(
+      numerator,
+      denominator,
+      denominatorSquared
+    );
+    return !any(isnan(quotient)) && !any(isinf(quotient));
+  }
+  return stableComplexDivide(numerator, denominator, quotient);
+}
+
+bool calculateNewtonCorrection(
+  vec2 value,
+  out vec2 correction
+) {
+  vec2 reciprocal;
+  if (!divideFastOrStable(vec2(1.0, 0.0), value, reciprocal)) {
+    return false;
+  }
+
+  // (z^3 - 1) / (3 z^2) = (z - 1 / z^2) / 3. The equivalent
+  // reciprocal form stays finite after a close pass by the pole, where z is
+  // huge but z^3 would overflow a highp float.
+  vec2 reciprocalSquared = complexSquare(reciprocal);
+  correction = (value - reciprocalSquared) / 3.0;
+  return !any(isnan(correction)) && !any(isinf(correction));
 }
 
 int nearestRoot(vec2 value) {

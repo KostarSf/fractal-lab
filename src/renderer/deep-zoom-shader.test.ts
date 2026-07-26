@@ -14,7 +14,7 @@ describe("deep zoom shader registry", () => {
       expect(shader).not.toContain("forceRebase");
       if (backend === "newton-cubic-perturbation") {
         expect(shader).toContain("normalizeExtendedDelta(");
-        expect(shader).toContain("calculateNewtonPerturbationFactor(");
+        expect(shader).toContain("calculateNextNewtonDelta(");
         expect(shader).not.toContain("referenceExhausted");
       } else {
         expect(shader).toContain("if (referenceExhausted || closerToCriticalPoint)");
@@ -54,8 +54,19 @@ describe("deep zoom shader registry", () => {
     const newton = createDeepZoomFragmentShader("newton-cubic-perturbation");
     expect(newton).toContain("const float INITIAL_DELTA_EXPONENT = -96.0;");
     expect(newton).toContain("u_scale * INITIAL_DELTA_SCALE");
-    expect(newton).toContain("complexMultiply(deltaMantissa, newtonFactor)");
-    expect(newton).toContain("stableComplexDivideInPlace(reciprocalTerm, reference)");
+    expect(newton).toContain("calculateNextNewtonDelta(");
+    expect(newton).toContain("useDirectExtendedOrbit");
+    expect(newton).toContain("iterateExtendedNewton(");
+    expect(newton).toContain("if (currentExponent > 10.0)");
+    expect(newton).toContain("nextMantissa = complexMultiply(deltaMantissa, factor);");
+    expect(newton).toContain("divideExtendedBy(reciprocalMantissa, reciprocalExponent, reference)");
+    expect(newton).toContain("addExtendedValues(");
+    expect(newton).toContain("min(referenceScale, actualScale) >= 1e-3");
+    expect(newton).toContain("max(referenceScale, actualScale) <= 1e3");
+    expect(newton).toContain("divideFastOrStableInPlace(reciprocalTerm, reference)");
+    expect(newton).toContain("if (!calculateNewtonCorrection(actualCurrent, correction))");
+    expect(newton).toContain("correction = (value - reciprocalSquared) / 3.0;");
+    expect(newton).not.toContain("derivativeSquared < 1e-20");
     expect(newton).toContain("if (exponent < -120.0)");
     expect(newton).not.toContain("subtractReference(actualZ, fetchReference(0))");
     expect(newton).toContain("quadraticConvergencePhase(");
@@ -63,6 +74,8 @@ describe("deep zoom shader registry", () => {
     const nova = createDeepZoomFragmentShader("nova-cubic-perturbation");
     expect(nova).toContain("uniform float u_novaRelaxation;");
     expect(nova).toContain("calculateCorrectionDelta(");
+    expect(nova).toContain("calculateReciprocalPerturbationTerm(");
+    expect(nova).not.toContain("denominatorSquared < 1e-38");
     expect(nova).toContain("u_novaRelaxation * correctionDelta");
     expect(nova).toContain("planeDelta;");
     expect(nova).toContain("thresholdCrossingPhase(previousMetric, finalMetric");

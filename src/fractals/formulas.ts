@@ -199,7 +199,7 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
       colorDensity: 0.075,
     },
     suggestedIterations: 80,
-    iterationControl: { label: "Итерации", min: 10, max: 300, step: 5 },
+    iterationControl: { label: "Итерации", min: 10, max: 600, step: 5 },
     deepZoom: {
       backend: "newton-cubic-perturbation",
       maxMagnification: 1e35,
