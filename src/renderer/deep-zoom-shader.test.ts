@@ -10,7 +10,9 @@ describe("deep zoom shader registry", () => {
       expect(shader).toContain("if (u_smoothColors)");
       expect(shader).toContain("ivec2(component, index)");
       expect(deepZoomTexelsPerIteration(backend)).toBeGreaterThanOrEqual(1);
-      expect(shader).toContain("if (referenceExhausted || unstable || forceRebase)");
+      expect(shader).toContain("if (referenceExhausted || closerToCriticalPoint)");
+      expect(shader).toContain("maxNorm(actualZ) < maxNorm(deltaCurrent)");
+      expect(shader).not.toContain("forceRebase");
       expect(shader).toContain("int postEscapeIterations = 0;");
       expect(shader).toContain("float(postEscapeIterations)");
     }
@@ -26,6 +28,7 @@ describe("deep zoom shader registry", () => {
     const burningShip = createDeepZoomFragmentShader("burning-ship-perturbation");
     expect(burningShip).toContain("vec2 transformedDelta = absolutePerturbationDelta(");
     expect(burningShip).not.toContain("abs(actualCurrent) - transformedReference");
+    expect(burningShip).not.toContain("crossesSignBoundary");
 
     const phoenix = createDeepZoomFragmentShader("phoenix-perturbation");
     expect(phoenix).toContain("uniform float u_phoenixMemory;");

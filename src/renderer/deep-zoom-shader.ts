@@ -90,7 +90,6 @@ const DEEP_ZOOM_SHADER_BACKENDS = {
       vec2 deltaPrevious = vec2(0.0);
     `,
     iterate: `
-      vec2 referenceValue = combineReference(referenceCurrent);
       vec4 transformedReference = absoluteReference(referenceCurrent);
       vec2 transformedDelta = absolutePerturbationDelta(
         referenceCurrent,
@@ -101,9 +100,6 @@ const DEEP_ZOOM_SHADER_BACKENDS = {
         complexSquare(transformedDelta) +
         planeDelta;
       nextDeltaPrevious = deltaCurrent;
-      forceRebase =
-        crossesSignBoundary(referenceValue.x, actualCurrent.x) ||
-        crossesSignBoundary(referenceValue.y, actualCurrent.y);
     `,
     rebase: `
       deltaCurrent = subtractReference(actualZ, referenceStartCurrent);
@@ -254,11 +250,8 @@ vec2 absolutePerturbationDelta(vec4 reference, vec2 delta) {
   );
 }
 
-bool crossesSignBoundary(float referenceValue, float actualValue) {
-  return
-    referenceValue != 0.0 &&
-    actualValue != 0.0 &&
-    ((referenceValue < 0.0) != (actualValue < 0.0));
+float maxNorm(vec2 value) {
+  return max(abs(value.x), abs(value.y));
 }
 
 vec3 cosinePalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
@@ -331,7 +324,6 @@ void main() {
     vec2 actualCurrent = addReference(referenceCurrent, deltaCurrent);
     vec2 nextDeltaCurrent = vec2(0.0);
     vec2 nextDeltaPrevious = deltaPrevious;
-    bool forceRebase = false;
     ${backend.iterate}
 
     int nextReferenceIndex = referenceIndex + 1;
@@ -351,8 +343,8 @@ void main() {
     }
 
     bool referenceExhausted = nextReferenceIndex >= u_referenceCount - 1;
-    bool unstable = dot(actualZ, actualZ) < dot(deltaCurrent, deltaCurrent);
-    if (referenceExhausted || unstable || forceRebase) {
+    bool closerToCriticalPoint = maxNorm(actualZ) < maxNorm(deltaCurrent);
+    if (referenceExhausted || closerToCriticalPoint) {
       vec4 referenceStartCurrent = fetchReference(0, 0);
       vec4 referenceStartPrevious = ${referenceStartPrevious};
       ${backend.rebase}
