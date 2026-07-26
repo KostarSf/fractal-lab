@@ -8,8 +8,9 @@ import {
   ReferenceOrbitCancelledError,
   ReferenceOrbitClient,
 } from "../deep-zoom/reference-orbit-client.ts";
+import { hasDeepZoomBackend } from "../deep-zoom/registry.ts";
 import type { ReferenceOrbitResult } from "../deep-zoom/types.ts";
-import type { ComplexValue } from "../fractals/types.ts";
+import type { ComplexValue, DeepZoomBackendId, FractalParameterValue } from "../fractals/types.ts";
 import { decimalDifferenceToNumber, shouldUseDeepZoom } from "../math/high-precision.ts";
 import { BasinRenderer } from "../renderer/basin-renderer.ts";
 import { CliffordRenderer } from "../renderer/clifford-renderer.ts";
@@ -27,13 +28,15 @@ const attractorStatus = ref<"idle" | "preparing" | "ready" | "error">("idle");
 const attractorPointCount = ref(0);
 const attractorError = ref("");
 
-const deepZoomMode = computed(() => {
+const deepZoomBackend = computed<DeepZoomBackendId | undefined>(() => {
   const formula = store.activeFormula;
-  return (
-    formula.renderer === "escape-time" &&
-    formula.deepZoom?.backend === "mandelbrot-perturbation" &&
-    shouldUseDeepZoom(store.magnification)
-  );
+  if (formula.renderer !== "escape-time" || !hasDeepZoomBackend(formula.deepZoom?.backend)) {
+    return undefined;
+  }
+  return formula.deepZoom.backend;
+});
+const deepZoomMode = computed(() => {
+  return deepZoomBackend.value !== undefined && shouldUseDeepZoom(store.magnification);
 });
 const deepZoomLimitReached = computed(() => {
   const formula = store.activeFormula;
@@ -78,6 +81,7 @@ let basinRenderer: BasinRenderer | undefined;
 let cliffordRenderer: CliffordRenderer | undefined;
 let deepRenderer: DeepZoomRenderer | undefined;
 let referenceOrbit: ReferenceOrbitResult | undefined;
+let referenceOrbitSignature = "";
 const referenceOrbitClient = new ReferenceOrbitClient();
 const cliffordTrajectoryClient = new CliffordTrajectoryClient();
 let resizeObserver: ResizeObserver | undefined;
@@ -130,6 +134,7 @@ watch(
     store.exactCenter[1],
     store.exactScale,
     store.maxIterations,
+    deepZoomParameterSignature(deepZoomBackend.value, store.parameterValues),
   ],
   () => scheduleReferenceOrbit(),
   { flush: "sync" },
@@ -166,6 +171,8 @@ function initializeRenderer(): void {
 
   try {
     disposeRenderers();
+    referenceOrbit = undefined;
+    referenceOrbitSignature = "";
     escapeRenderer = new FractalRenderer(canvas.value);
     basinRenderer = new BasinRenderer(canvas.value);
     cliffordRenderer = new CliffordRenderer(canvas.value);
@@ -342,9 +349,18 @@ function scheduleRender(): void {
 
     try {
       const formula = store.activeFormula;
-      if (deepZoomMode.value && deepRenderer && referenceOrbit) {
+      const backend = deepZoomBackend.value;
+      const parameterSignature = deepZoomParameterSignature(backend, store.parameterValues);
+      if (
+        deepZoomMode.value &&
+        backend &&
+        deepRenderer &&
+        referenceOrbit?.backend === backend &&
+        referenceOrbitSignature === parameterSignature
+      ) {
         deepRenderer.resize(quality);
         deepRenderer.render({
+          backend,
           centerDelta: [
             decimalDifferenceToNumber(
               store.exactCenter[0],
@@ -363,6 +379,7 @@ function scheduleRender(): void {
           colorDensity: store.colorDensity,
           colorOffset: store.colorOffset,
           smoothColors: store.smoothColors,
+          parameters: store.parameterValues,
         });
       } else if (formula.renderer === "escape-time" && escapeRenderer) {
         escapeRenderer.resize(quality);
@@ -415,6 +432,7 @@ function scheduleReferenceOrbit(): void {
 
   if (!deepZoomMode.value) {
     referenceOrbit = undefined;
+    referenceOrbitSignature = "";
     deepZoomStatus.value = "idle";
     deepZoomPrecision.value = 0;
     return;
@@ -434,15 +452,24 @@ function scheduleReferenceOrbit(): void {
 }
 
 async function prepareReferenceOrbit(): Promise<void> {
+  const backend = deepZoomBackend.value;
+  if (!backend) {
+    return;
+  }
+
   const center = [store.exactCenter[0], store.exactCenter[1]] as const;
   const scale = store.exactScale;
   const maxIterations = store.maxIterations;
+  const parameters = copyFractalParameters(store.parameterValues);
+  const parameterSignature = deepZoomParameterSignature(backend, parameters);
   const viewportAspect = canvas.value
     ? canvas.value.clientWidth / Math.max(1, canvas.value.clientHeight)
     : 1;
 
   try {
     const result = await referenceOrbitClient.request({
+      backend,
+      parameters,
       center,
       scale,
       maxIterations,
@@ -451,6 +478,9 @@ async function prepareReferenceOrbit(): Promise<void> {
 
     if (
       !deepZoomMode.value ||
+      deepZoomBackend.value !== backend ||
+      deepZoomParameterSignature(deepZoomBackend.value, store.parameterValues) !==
+        parameterSignature ||
       store.exactCenter[0] !== center[0] ||
       store.exactCenter[1] !== center[1] ||
       store.exactScale !== scale ||
@@ -461,6 +491,7 @@ async function prepareReferenceOrbit(): Promise<void> {
 
     deepRenderer?.setReferenceOrbit(result);
     referenceOrbit = result;
+    referenceOrbitSignature = parameterSignature;
     deepZoomPrecision.value = result.precisionDigits;
     deepZoomStatus.value = "ready";
     scheduleRender();
@@ -471,6 +502,30 @@ async function prepareReferenceOrbit(): Promise<void> {
     deepZoomStatus.value = "error";
     deepZoomError.value = error instanceof Error ? error.message : String(error);
   }
+}
+
+function deepZoomParameterSignature(
+  backend: DeepZoomBackendId | undefined,
+  parameters: Readonly<Record<string, FractalParameterValue>>,
+): string {
+  if (!backend) {
+    return "";
+  }
+
+  return `${backend}|${Object.keys(parameters)
+    .sort()
+    .map((key) => `${key}:${JSON.stringify(parameters[key])}`)
+    .join("|")}`;
+}
+
+function copyFractalParameters(
+  parameters: Readonly<Record<string, FractalParameterValue>>,
+): Record<string, FractalParameterValue> {
+  const copy: Record<string, FractalParameterValue> = {};
+  for (const [key, value] of Object.entries(parameters)) {
+    copy[key] = Array.isArray(value) ? [value[0]!, value[1]!] : value;
+  }
+  return copy;
 }
 
 function cliffordOrbitSignature(): string {

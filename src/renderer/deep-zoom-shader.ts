@@ -1,6 +1,159 @@
+import type { DeepZoomBackendId } from "../fractals/types.ts";
+
 const MAX_ITERATIONS = 2_048;
 
-export const DEEP_ZOOM_FRAGMENT_SHADER = `#version 300 es
+interface DeepZoomShaderBackend {
+  readonly texelsPerIteration: 1 | 2;
+  readonly uniforms: string;
+  readonly parameterGuard: string;
+  readonly initialize: string;
+  readonly iterate: string;
+  readonly rebase: string;
+}
+
+const DEEP_ZOOM_SHADER_BACKENDS = {
+  "mandelbrot-perturbation": {
+    texelsPerIteration: 1,
+    uniforms: "",
+    parameterGuard: "",
+    initialize: `
+      vec2 deltaCurrent = vec2(0.0);
+      vec2 deltaPrevious = vec2(0.0);
+    `,
+    iterate: `
+      nextDeltaCurrent =
+        2.0 * multiplyReference(referenceCurrent, deltaCurrent) +
+        complexSquare(deltaCurrent) +
+        planeDelta;
+      nextDeltaPrevious = deltaCurrent;
+    `,
+    rebase: `
+      deltaCurrent = subtractReference(actualZ, referenceStartCurrent);
+    `,
+  },
+  "julia-perturbation": {
+    texelsPerIteration: 1,
+    uniforms: "uniform vec2 u_juliaConstant;",
+    parameterGuard: `
+      if (any(isnan(u_juliaConstant))) {
+        discard;
+      }
+    `,
+    initialize: `
+      vec2 deltaCurrent = planeDelta;
+      vec2 deltaPrevious = vec2(0.0);
+    `,
+    iterate: `
+      nextDeltaCurrent =
+        2.0 * multiplyReference(referenceCurrent, deltaCurrent) +
+        complexSquare(deltaCurrent);
+      nextDeltaPrevious = deltaCurrent;
+    `,
+    rebase: `
+      deltaCurrent = subtractReference(actualZ, referenceStartCurrent);
+    `,
+  },
+  "tricorn-perturbation": {
+    texelsPerIteration: 1,
+    uniforms: "",
+    parameterGuard: "",
+    initialize: `
+      vec2 deltaCurrent = vec2(0.0);
+      vec2 deltaPrevious = vec2(0.0);
+    `,
+    iterate: `
+      vec4 conjugatedReference = vec4(
+        referenceCurrent.x,
+        -referenceCurrent.y,
+        referenceCurrent.z,
+        -referenceCurrent.w
+      );
+      vec2 conjugatedDelta = complexConjugate(deltaCurrent);
+      nextDeltaCurrent =
+        2.0 * multiplyReference(conjugatedReference, conjugatedDelta) +
+        complexSquare(conjugatedDelta) +
+        planeDelta;
+      nextDeltaPrevious = deltaCurrent;
+    `,
+    rebase: `
+      deltaCurrent = subtractReference(actualZ, referenceStartCurrent);
+    `,
+  },
+  "burning-ship-perturbation": {
+    texelsPerIteration: 1,
+    uniforms: "",
+    parameterGuard: "",
+    initialize: `
+      vec2 deltaCurrent = vec2(0.0);
+      vec2 deltaPrevious = vec2(0.0);
+    `,
+    iterate: `
+      vec2 referenceValue = combineReference(referenceCurrent);
+      vec4 transformedReference = absoluteReference(referenceCurrent);
+      vec2 transformedDelta = absolutePerturbationDelta(
+        referenceCurrent,
+        deltaCurrent
+      );
+      nextDeltaCurrent =
+        2.0 * multiplyReference(transformedReference, transformedDelta) +
+        complexSquare(transformedDelta) +
+        planeDelta;
+      nextDeltaPrevious = deltaCurrent;
+      forceRebase =
+        crossesSignBoundary(referenceValue.x, actualCurrent.x) ||
+        crossesSignBoundary(referenceValue.y, actualCurrent.y);
+    `,
+    rebase: `
+      deltaCurrent = subtractReference(actualZ, referenceStartCurrent);
+    `,
+  },
+  "phoenix-perturbation": {
+    texelsPerIteration: 2,
+    uniforms: `
+      uniform vec2 u_phoenixConstant;
+      uniform float u_phoenixMemory;
+    `,
+    parameterGuard: `
+      if (any(isnan(u_phoenixConstant)) || isnan(u_phoenixMemory)) {
+        discard;
+      }
+    `,
+    initialize: `
+      vec2 deltaCurrent = planeDelta;
+      vec2 deltaPrevious = vec2(0.0);
+    `,
+    iterate: `
+      nextDeltaCurrent =
+        2.0 * multiplyReference(referenceCurrent, deltaCurrent) +
+        complexSquare(deltaCurrent) +
+        u_phoenixMemory * deltaPrevious;
+      nextDeltaPrevious = deltaCurrent;
+    `,
+    rebase: `
+      deltaCurrent = subtractReference(actualZ, referenceStartCurrent);
+      deltaPrevious = subtractReference(actualPreviousZ, referenceStartPrevious);
+    `,
+  },
+} as const satisfies Record<DeepZoomBackendId, DeepZoomShaderBackend>;
+
+export function deepZoomTexelsPerIteration(backend: DeepZoomBackendId): 1 | 2 {
+  return DEEP_ZOOM_SHADER_BACKENDS[backend].texelsPerIteration;
+}
+
+export function createDeepZoomFragmentShader(backendId: DeepZoomBackendId): string {
+  const backend = DEEP_ZOOM_SHADER_BACKENDS[backendId];
+  const referencePrevious =
+    backend.texelsPerIteration === 2 ? "fetchReference(referenceIndex, 1)" : "vec4(0.0)";
+  const nextReferencePrevious =
+    backend.texelsPerIteration === 2 ? "fetchReference(nextReferenceIndex, 1)" : "vec4(0.0)";
+  const actualPrevious =
+    backend.texelsPerIteration === 2
+      ? "addReference(nextReferencePrevious, nextDeltaPrevious)"
+      : "actualCurrent";
+  const referenceStartPrevious =
+    backend.texelsPerIteration === 2 ? "fetchReference(0, 1)" : "vec4(0.0)";
+
+  return `#version 300 es
 precision highp float;
 precision highp sampler2D;
 
@@ -16,6 +169,7 @@ uniform float u_colorOffset;
 uniform bool u_smoothColors;
 uniform sampler2D u_referenceOrbit;
 uniform int u_referenceCount;
+${backend.uniforms}
 
 vec2 complexSquare(vec2 value) {
   return vec2(
@@ -29,6 +183,80 @@ vec2 complexMultiply(vec2 left, vec2 right) {
     left.x * right.x - left.y * right.y,
     left.x * right.y + left.y * right.x
   );
+}
+
+vec2 complexConjugate(vec2 value) {
+  return vec2(value.x, -value.y);
+}
+
+vec4 fetchReference(int index, int component) {
+  return texelFetch(
+    u_referenceOrbit,
+    ivec2(component, index),
+    0
+  );
+}
+
+vec2 combineReference(vec4 reference) {
+  return reference.xy + reference.zw;
+}
+
+vec2 addReference(vec4 reference, vec2 delta) {
+  return reference.xy + (reference.zw + delta);
+}
+
+vec2 subtractReference(vec2 actual, vec4 reference) {
+  return (actual - reference.xy) - reference.zw;
+}
+
+vec2 multiplyReference(vec4 reference, vec2 value) {
+  return
+    complexMultiply(reference.xy, value) +
+    complexMultiply(reference.zw, value);
+}
+
+vec4 absoluteReference(vec4 reference) {
+  vec2 value = combineReference(reference);
+  vec2 direction = vec2(
+    value.x > 0.0 ? 1.0 : (value.x < 0.0 ? -1.0 : 0.0),
+    value.y > 0.0 ? 1.0 : (value.y < 0.0 ? -1.0 : 0.0)
+  );
+  return vec4(reference.xy * direction, reference.zw * direction);
+}
+
+float absolutePerturbationDeltaComponent(
+  float referenceHigh,
+  float referenceLow,
+  float delta
+) {
+  float reference = referenceHigh + referenceLow;
+  float actual = referenceHigh + (referenceLow + delta);
+
+  if (reference > 0.0) {
+    return actual >= 0.0
+      ? delta
+      : -2.0 * referenceHigh + (-2.0 * referenceLow - delta);
+  }
+  if (reference < 0.0) {
+    return actual <= 0.0
+      ? -delta
+      : 2.0 * referenceHigh + (2.0 * referenceLow + delta);
+  }
+  return abs(delta);
+}
+
+vec2 absolutePerturbationDelta(vec4 reference, vec2 delta) {
+  return vec2(
+    absolutePerturbationDeltaComponent(reference.x, reference.z, delta.x),
+    absolutePerturbationDeltaComponent(reference.y, reference.w, delta.y)
+  );
+}
+
+bool crossesSignBoundary(float referenceValue, float actualValue) {
+  return
+    referenceValue != 0.0 &&
+    actualValue != 0.0 &&
+    ((referenceValue < 0.0) != (actualValue < 0.0));
 }
 
 vec3 cosinePalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
@@ -80,9 +308,10 @@ float noise(vec2 position) {
 }
 
 void main() {
+  ${backend.parameterGuard}
   vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
-  vec2 deltaC = u_centerDelta + pixel * (u_scale / u_resolution.y);
-  vec2 deltaZ = vec2(0.0);
+  vec2 planeDelta = u_centerDelta + pixel * (u_scale / u_resolution.y);
+  ${backend.initialize}
   vec2 actualZ = vec2(0.0);
   int referenceIndex = 0;
   int iteration = 0;
@@ -93,25 +322,21 @@ void main() {
       break;
     }
 
-    vec4 reference = texelFetch(
-      u_referenceOrbit,
-      ivec2(referenceIndex, 0),
-      0
-    );
-    vec2 linearTerm =
-      2.0 * (
-        complexMultiply(reference.xy, deltaZ) +
-        complexMultiply(reference.zw, deltaZ)
-      );
-    deltaZ = linearTerm + complexSquare(deltaZ) + deltaC;
+    vec4 referenceCurrent = fetchReference(referenceIndex, 0);
+    vec4 referencePrevious = ${referencePrevious};
+    vec2 actualCurrent = addReference(referenceCurrent, deltaCurrent);
+    vec2 nextDeltaCurrent = vec2(0.0);
+    vec2 nextDeltaPrevious = deltaPrevious;
+    bool forceRebase = false;
+    ${backend.iterate}
 
     int nextReferenceIndex = referenceIndex + 1;
-    vec4 nextReference = texelFetch(
-      u_referenceOrbit,
-      ivec2(nextReferenceIndex, 0),
-      0
-    );
-    actualZ = nextReference.xy + (nextReference.zw + deltaZ);
+    vec4 nextReferenceCurrent = fetchReference(nextReferenceIndex, 0);
+    vec4 nextReferencePrevious = ${nextReferencePrevious};
+    actualZ = addReference(nextReferenceCurrent, nextDeltaCurrent);
+    vec2 actualPreviousZ = ${actualPrevious};
+    deltaCurrent = nextDeltaCurrent;
+    deltaPrevious = nextDeltaPrevious;
 
     if (dot(actualZ, actualZ) > 4.0) {
       iteration = i;
@@ -120,9 +345,11 @@ void main() {
     }
 
     bool referenceExhausted = nextReferenceIndex >= u_referenceCount - 1;
-    bool unstable = dot(actualZ, actualZ) < dot(deltaZ, deltaZ);
-    if (referenceExhausted || unstable) {
-      deltaZ = actualZ;
+    bool unstable = dot(actualZ, actualZ) < dot(deltaCurrent, deltaCurrent);
+    if (referenceExhausted || unstable || forceRebase) {
+      vec4 referenceStartCurrent = fetchReference(0, 0);
+      vec4 referenceStartPrevious = ${referenceStartPrevious};
+      ${backend.rebase}
       referenceIndex = 0;
     } else {
       referenceIndex = nextReferenceIndex;
@@ -147,3 +374,6 @@ void main() {
   outColor = vec4(color, 1.0);
 }
 `;
+}
+
+export const DEEP_ZOOM_FRAGMENT_SHADER = createDeepZoomFragmentShader("mandelbrot-perturbation");

@@ -47,6 +47,10 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     suggestedIterations: 360,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
+    deepZoom: {
+      backend: "julia-perturbation",
+      maxMagnification: 1e35,
+    },
     parameters: [
       {
         key: "constant",
@@ -83,6 +87,10 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     suggestedIterations: 380,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
+    deepZoom: {
+      backend: "burning-ship-perturbation",
+      maxMagnification: 1e35,
+    },
     parameters: [],
     shader: {
       setup: `
@@ -110,6 +118,10 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     suggestedIterations: 340,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
+    deepZoom: {
+      backend: "tricorn-perturbation",
+      maxMagnification: 1e35,
+    },
     parameters: [],
     shader: {
       setup: `
@@ -137,6 +149,10 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     suggestedIterations: 380,
     iterationControl: { label: "Итерации", min: 40, max: 1500, step: 10 },
     escapePower: 2,
+    deepZoom: {
+      backend: "phoenix-perturbation",
+      maxMagnification: 1e35,
+    },
     parameters: [
       {
         key: "constant",

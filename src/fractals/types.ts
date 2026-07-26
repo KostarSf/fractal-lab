@@ -44,6 +44,13 @@ export interface ComplexParameter extends ParameterBase {
 export type FractalParameter = NumberParameter | ComplexParameter;
 export type FractalParameterValue = number | ComplexValue;
 
+export type DeepZoomBackendId =
+  | "mandelbrot-perturbation"
+  | "julia-perturbation"
+  | "tricorn-perturbation"
+  | "burning-ship-perturbation"
+  | "phoenix-perturbation";
+
 interface FractalFormulaBase {
   readonly id: string;
   readonly label: string;
@@ -59,7 +66,7 @@ export interface EscapeTimeFormula extends FractalFormulaBase {
   readonly renderer: "escape-time";
   readonly escapePower: number;
   readonly deepZoom?: {
-    readonly backend: "mandelbrot-perturbation";
+    readonly backend: DeepZoomBackendId;
     readonly maxMagnification?: number;
   };
   readonly shader: {

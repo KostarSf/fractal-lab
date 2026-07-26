@@ -39,7 +39,8 @@ describe("fractal store", () => {
 
     store.selectFormula("julia");
     store.setCamera([1, -1], 1e-100);
-    expect(store.scale).toBe(1e-35);
+    expect(store.scale).toBe(3.2000000000000003e-35);
+    expect(store.magnification).toBe(1e35);
   });
 
   it("updates parameters immutably", () => {

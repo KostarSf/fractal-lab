@@ -36,6 +36,17 @@ describe("fractal formula registry", () => {
         maxMagnification: 1e35,
       },
     });
+    expect(
+      FRACTAL_FORMULAS.filter((formula) => formula.renderer === "escape-time").map(
+        (formula) => formula.deepZoom?.backend,
+      ),
+    ).toEqual([
+      "mandelbrot-perturbation",
+      "julia-perturbation",
+      "burning-ship-perturbation",
+      "tricorn-perturbation",
+      "phoenix-perturbation",
+    ]);
   });
 
   it("generates complete shaders for pixel-based formulas", () => {

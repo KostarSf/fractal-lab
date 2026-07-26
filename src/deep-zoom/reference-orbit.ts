@@ -1,15 +1,16 @@
 import Decimal from "decimal.js";
 import { precisionForScale } from "../math/high-precision.ts";
+import {
+  createPlanePoint,
+  getReferenceBackend,
+  packReferenceState,
+  referenceMagnitudeSquared,
+} from "./reference-backends.ts";
 import type { ReferenceOrbitRequest, ReferenceOrbitResult } from "./types.ts";
 
 const REFERENCE_ESCAPE_LIMIT_SQUARED = 65_536;
 const MAX_REFERENCE_ITERATIONS = 2_048;
 const REFERENCE_SAMPLE_COORDINATES = [-0.42, -0.21, 0, 0.21, 0.42] as const;
-
-function splitFloat64(value: number): readonly [high: number, low: number] {
-  const high = Math.fround(value);
-  return [high, Math.fround(value - high)];
-}
 
 export function calculateReferenceOrbit(request: ReferenceOrbitRequest): ReferenceOrbitResult {
   const precisionDigits = precisionForScale(request.scale);
@@ -21,42 +22,33 @@ export function calculateReferenceOrbit(request: ReferenceOrbitRequest): Referen
     1,
     Math.min(MAX_REFERENCE_ITERATIONS, Math.trunc(request.maxIterations)),
   );
-  const centerReal = new D(request.center[0]);
-  const centerImaginary = new D(request.center[1]);
-  const orbit = new Float32Array((maxIterations + 1) * 4);
-
-  let real = new D(0);
-  let imaginary = new D(0);
+  const planePoint = createPlanePoint(D, request.center);
+  const backend = getReferenceBackend(request.backend);
+  const orbit = new Float32Array((maxIterations + 1) * backend.texelsPerIteration * 4);
+  let state = backend.initialize(D, planePoint, request.parameters);
   let orbitLength = 0;
 
   for (let iteration = 0; iteration <= maxIterations; iteration += 1) {
-    const [realHigh, realLow] = splitFloat64(real.toNumber());
-    const [imaginaryHigh, imaginaryLow] = splitFloat64(imaginary.toNumber());
-    const offset = iteration * 4;
-    orbit[offset] = realHigh;
-    orbit[offset + 1] = imaginaryHigh;
-    orbit[offset + 2] = realLow;
-    orbit[offset + 3] = imaginaryLow;
+    packReferenceState(orbit, iteration, backend.texelsPerIteration, state);
     orbitLength = iteration + 1;
 
-    const magnitudeSquared = real.times(real).plus(imaginary.times(imaginary));
+    const magnitudeSquared = referenceMagnitudeSquared(state);
     if (iteration > 0 && magnitudeSquared.greaterThan(REFERENCE_ESCAPE_LIMIT_SQUARED)) {
       break;
     }
 
-    const nextReal = real.times(real).minus(imaginary.times(imaginary)).plus(centerReal);
-    const nextImaginary = real.times(imaginary).times(2).plus(centerImaginary);
-    real = nextReal;
-    imaginary = nextImaginary;
+    state = backend.iterate(D, state, planePoint, request.parameters);
   }
 
   return {
     requestId: request.requestId,
+    backend: request.backend,
     center: request.center,
     scale: request.scale,
     precisionDigits,
     orbitLength,
-    values: orbit.slice(0, orbitLength * 4),
+    texelsPerIteration: backend.texelsPerIteration,
+    values: orbit.slice(0, orbitLength * backend.texelsPerIteration * 4),
   };
 }
 

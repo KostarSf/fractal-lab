@@ -1,10 +1,11 @@
 import type { ReferenceOrbitResult } from "../deep-zoom/types.ts";
 import { VERTEX_SHADER } from "../fractals/shader.ts";
-import type { ComplexValue } from "../fractals/types.ts";
+import type { ComplexValue, DeepZoomBackendId, FractalParameterValue } from "../fractals/types.ts";
 import { createWebGLProgram, getUniform, type RenderState } from "./fractal-renderer.ts";
-import { DEEP_ZOOM_FRAGMENT_SHADER } from "./deep-zoom-shader.ts";
+import { createDeepZoomFragmentShader, deepZoomTexelsPerIteration } from "./deep-zoom-shader.ts";
 
-export interface DeepZoomRenderState extends Omit<RenderState, "center" | "parameters"> {
+export interface DeepZoomRenderState extends Omit<RenderState, "center"> {
+  readonly backend: DeepZoomBackendId;
   readonly centerDelta: ComplexValue;
 }
 
@@ -26,11 +27,13 @@ type UniformName = (typeof UNIFORM_NAMES)[number];
 export class DeepZoomRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGL2RenderingContext;
-  readonly #program: WebGLProgram;
   readonly #vertexArray: WebGLVertexArrayObject;
   readonly #orbitTexture: WebGLTexture;
-  readonly #uniforms = new Map<UniformName, WebGLUniformLocation>();
 
+  #backend: DeepZoomBackendId | undefined;
+  #program: WebGLProgram | undefined;
+  #uniforms = new Map<UniformName, WebGLUniformLocation>();
+  #parameterUniforms = new Map<string, WebGLUniformLocation>();
   #referenceCount = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -56,22 +59,26 @@ export class DeepZoomRenderer {
     this.#gl = gl;
     this.#vertexArray = vertexArray;
     this.#orbitTexture = orbitTexture;
-    this.#program = createWebGLProgram(gl, VERTEX_SHADER, DEEP_ZOOM_FRAGMENT_SHADER);
-
-    for (const name of UNIFORM_NAMES) {
-      this.#uniforms.set(name, getUniform(gl, this.#program, name));
-    }
+    this.#setBackend("mandelbrot-perturbation");
   }
 
   setReferenceOrbit(reference: ReferenceOrbitResult): void {
     const gl = this.#gl;
-    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-    if (reference.orbitLength > maxTextureSize) {
+    const expectedTexels = deepZoomTexelsPerIteration(reference.backend);
+    if (reference.texelsPerIteration !== expectedTexels) {
       throw new Error(
-        `Опорная орбита (${reference.orbitLength}) превышает лимит GPU (${maxTextureSize}).`,
+        `Deep-zoom backend ${reference.backend} ожидал ${expectedTexels} texel на итерацию, получено ${reference.texelsPerIteration}.`,
       );
     }
 
+    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    if (reference.orbitLength > maxTextureSize || reference.texelsPerIteration > maxTextureSize) {
+      throw new Error(
+        `Опорная орбита (${reference.orbitLength} итераций) превышает лимит GPU (${maxTextureSize}).`,
+      );
+    }
+
+    this.#setBackend(reference.backend);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.#orbitTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -82,8 +89,8 @@ export class DeepZoomRenderer {
       gl.TEXTURE_2D,
       0,
       gl.RGBA32F,
+      reference.texelsPerIteration,
       reference.orbitLength,
-      1,
       0,
       gl.RGBA,
       gl.FLOAT,
@@ -110,6 +117,9 @@ export class DeepZoomRenderer {
     if (this.#referenceCount < 2) {
       throw new Error("Опорная орбита deep zoom ещё не подготовлена.");
     }
+    if (state.backend !== this.#backend || !this.#program) {
+      throw new Error("Deep-zoom renderer получил состояние другого backend'а.");
+    }
 
     const gl = this.#gl;
     gl.disable(gl.BLEND);
@@ -129,6 +139,7 @@ export class DeepZoomRenderer {
     gl.uniform1i(this.#uniforms.get("u_smoothColors")!, state.smoothColors ? 1 : 0);
     gl.uniform1i(this.#uniforms.get("u_referenceOrbit")!, 0);
     gl.uniform1i(this.#uniforms.get("u_referenceCount")!, this.#referenceCount);
+    this.#setParameters(state.parameters);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
@@ -136,6 +147,64 @@ export class DeepZoomRenderer {
   dispose(): void {
     this.#gl.deleteTexture(this.#orbitTexture);
     this.#gl.deleteVertexArray(this.#vertexArray);
-    this.#gl.deleteProgram(this.#program);
+    if (this.#program) {
+      this.#gl.deleteProgram(this.#program);
+    }
+  }
+
+  #setBackend(backend: DeepZoomBackendId): void {
+    if (backend === this.#backend) {
+      return;
+    }
+
+    const program = createWebGLProgram(
+      this.#gl,
+      VERTEX_SHADER,
+      createDeepZoomFragmentShader(backend),
+    );
+    const uniforms = new Map<UniformName, WebGLUniformLocation>();
+    for (const name of UNIFORM_NAMES) {
+      uniforms.set(name, getUniform(this.#gl, program, name));
+    }
+
+    const parameterUniforms = new Map<string, WebGLUniformLocation>();
+    const parameterNames: readonly (readonly [key: string, uniform: string])[] =
+      backend === "julia-perturbation"
+        ? [["constant", "u_juliaConstant"]]
+        : backend === "phoenix-perturbation"
+          ? [
+              ["constant", "u_phoenixConstant"],
+              ["memory", "u_phoenixMemory"],
+            ]
+          : [];
+    for (const [key, uniformName] of parameterNames) {
+      parameterUniforms.set(key, getUniform(this.#gl, program, uniformName));
+    }
+
+    if (this.#program) {
+      this.#gl.deleteProgram(this.#program);
+    }
+    this.#backend = backend;
+    this.#program = program;
+    this.#uniforms = uniforms;
+    this.#parameterUniforms = parameterUniforms;
+    this.#referenceCount = 0;
+  }
+
+  #setParameters(parameters: Readonly<Record<string, FractalParameterValue>>): void {
+    for (const [key, uniform] of this.#parameterUniforms) {
+      const value = parameters[key];
+      if (Array.isArray(value)) {
+        this.#gl.uniform2f(uniform, value[0]!, value[1]!);
+      } else if (typeof value === "number") {
+        this.#gl.uniform1f(uniform, value);
+      } else if (key === "constant" && this.#backend === "julia-perturbation") {
+        this.#gl.uniform2f(uniform, -0.745, 0.113);
+      } else if (key === "constant" && this.#backend === "phoenix-perturbation") {
+        this.#gl.uniform2f(uniform, 0.5667, 0);
+      } else if (key === "memory") {
+        this.#gl.uniform1f(uniform, -0.5);
+      }
+    }
   }
 }
