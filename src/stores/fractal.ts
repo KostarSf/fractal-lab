@@ -47,7 +47,7 @@ function cameraForFormula(formulaId: string): SerializedCamera {
 
 function minimumScaleForFormula(formulaId: string): string {
   const formula = findFormula(formulaId);
-  if (formula.renderer === "escape-time" && formula.deepZoom?.maxMagnification !== undefined) {
+  if (formula.deepZoom?.maxMagnification !== undefined) {
     return String(formula.initialView.scale / formula.deepZoom.maxMagnification);
   }
   if (formula.renderer === "geometric-ifs") {

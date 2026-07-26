@@ -33,11 +33,19 @@ export function calculateReferenceOrbit(request: ReferenceOrbitRequest): Referen
     orbitLength = iteration + 1;
 
     const magnitudeSquared = referenceMagnitudeSquared(state);
-    if (iteration > 0 && magnitudeSquared.greaterThan(REFERENCE_ESCAPE_LIMIT_SQUARED)) {
+    if (
+      request.backend !== "newton-cubic-perturbation" &&
+      iteration > 0 &&
+      magnitudeSquared.greaterThan(REFERENCE_ESCAPE_LIMIT_SQUARED)
+    ) {
       break;
     }
 
-    state = backend.iterate(D, state, planePoint, request.parameters);
+    const nextState = backend.iterate(D, state, planePoint, request.parameters);
+    if (!nextState) {
+      break;
+    }
+    state = nextState;
   }
 
   return {

@@ -189,7 +189,7 @@ d =  0.7
 
 ## Вне текущей задачи
 
-- Deep zoom для Newton, Nova и Clifford.
+- Deep zoom для Clifford.
 - Редактор произвольных полиномов Newton.
 - Соединение точек Clifford линиями.
 - Buddhabrot, Fractal Flame и Mandelbulb.

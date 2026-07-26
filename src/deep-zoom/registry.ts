@@ -6,6 +6,8 @@ export const DEEP_ZOOM_BACKEND_IDS = [
   "tricorn-perturbation",
   "burning-ship-perturbation",
   "phoenix-perturbation",
+  "newton-cubic-perturbation",
+  "nova-cubic-perturbation",
 ] as const satisfies readonly DeepZoomBackendId[];
 
 const DEEP_ZOOM_BACKEND_ID_SET = new Set<string>(DEEP_ZOOM_BACKEND_IDS);

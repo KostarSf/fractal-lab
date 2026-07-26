@@ -22,10 +22,18 @@ describe("fractal formula registry", () => {
     expect(FRACTAL_FORMULAS.find((formula) => formula.id === "newton")).toMatchObject({
       renderer: "root-basin",
       basinBackend: "newton-cubic",
+      deepZoom: {
+        backend: "newton-cubic-perturbation",
+        maxMagnification: 1e35,
+      },
     });
     expect(FRACTAL_FORMULAS.find((formula) => formula.id === "nova")).toMatchObject({
       renderer: "root-basin",
       basinBackend: "nova-cubic",
+      deepZoom: {
+        backend: "nova-cubic-perturbation",
+        maxMagnification: 1e35,
+      },
     });
     expect(FRACTAL_FORMULAS.find((formula) => formula.id === "clifford")).toMatchObject({
       renderer: "point-attractor",

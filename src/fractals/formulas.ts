@@ -200,6 +200,10 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     },
     suggestedIterations: 80,
     iterationControl: { label: "Итерации", min: 10, max: 300, step: 5 },
+    deepZoom: {
+      backend: "newton-cubic-perturbation",
+      maxMagnification: 1e35,
+    },
     parameters: [
       {
         key: "tolerance",
@@ -228,6 +232,10 @@ export const FRACTAL_FORMULAS: readonly FractalFormula[] = [
     },
     suggestedIterations: 120,
     iterationControl: { label: "Итерации", min: 20, max: 500, step: 5 },
+    deepZoom: {
+      backend: "nova-cubic-perturbation",
+      maxMagnification: 1e35,
+    },
     parameters: [
       {
         key: "relaxation",

@@ -23,7 +23,7 @@ interface ReferenceBackend {
     state: ReferenceState,
     planePoint: PreciseComplex,
     parameters: Readonly<Record<string, FractalParameterValue>>,
-  ): ReferenceState;
+  ): ReferenceState | undefined;
 }
 
 const ZERO_COMPLEX_PARAMETER = [0, 0] as const;
@@ -66,6 +66,20 @@ function add(left: PreciseComplex, right: PreciseComplex): PreciseComplex {
   };
 }
 
+function subtract(left: PreciseComplex, right: PreciseComplex): PreciseComplex {
+  return {
+    real: left.real.minus(right.real),
+    imaginary: left.imaginary.minus(right.imaginary),
+  };
+}
+
+function multiply(left: PreciseComplex, right: PreciseComplex): PreciseComplex {
+  return {
+    real: left.real.times(right.real).minus(left.imaginary.times(right.imaginary)),
+    imaginary: left.real.times(right.imaginary).plus(left.imaginary.times(right.real)),
+  };
+}
+
 function multiplyScalar(value: PreciseComplex, scalar: Decimal): PreciseComplex {
   return {
     real: value.real.times(scalar),
@@ -78,6 +92,44 @@ function square(value: PreciseComplex): PreciseComplex {
     real: value.real.times(value.real).minus(value.imaginary.times(value.imaginary)),
     imaginary: value.real.times(value.imaginary).times(2),
   };
+}
+
+function divide(
+  numerator: PreciseComplex,
+  denominator: PreciseComplex,
+): PreciseComplex | undefined {
+  const denominatorSquared = denominator.real
+    .times(denominator.real)
+    .plus(denominator.imaginary.times(denominator.imaginary));
+  if (denominatorSquared.isZero()) {
+    return undefined;
+  }
+
+  return {
+    real: numerator.real
+      .times(denominator.real)
+      .plus(numerator.imaginary.times(denominator.imaginary))
+      .dividedBy(denominatorSquared),
+    imaginary: numerator.imaginary
+      .times(denominator.real)
+      .minus(numerator.real.times(denominator.imaginary))
+      .dividedBy(denominatorSquared),
+  };
+}
+
+function cubicCorrection(
+  D: Decimal.Constructor,
+  value: PreciseComplex,
+): PreciseComplex | undefined {
+  const squared = square(value);
+  const cubed = multiply(squared, value);
+  return divide(
+    {
+      real: cubed.real.minus(1),
+      imaginary: cubed.imaginary,
+    },
+    multiplyScalar(squared, new D(3)),
+  );
 }
 
 function conjugateSquare(value: PreciseComplex): PreciseComplex {
@@ -162,6 +214,43 @@ const REFERENCE_BACKENDS = {
       };
     },
   },
+  "newton-cubic-perturbation": {
+    texelsPerIteration: 1,
+    initialize(_D, planePoint) {
+      return { current: planePoint, previous: planePoint };
+    },
+    iterate(D, state) {
+      const correction = cubicCorrection(D, state.current);
+      if (!correction) {
+        return undefined;
+      }
+      return {
+        current: subtract(state.current, correction),
+        previous: state.current,
+      };
+    },
+  },
+  "nova-cubic-perturbation": {
+    texelsPerIteration: 1,
+    initialize(D) {
+      const initial = {
+        real: new D(1),
+        imaginary: new D(0),
+      };
+      return { current: initial, previous: initial };
+    },
+    iterate(D, state, planePoint, parameters) {
+      const correction = cubicCorrection(D, state.current);
+      if (!correction) {
+        return undefined;
+      }
+      const relaxation = numberParameter(D, parameters, "relaxation", 1);
+      return {
+        current: add(subtract(state.current, multiplyScalar(correction, relaxation)), planePoint),
+        previous: state.current,
+      };
+    },
+  },
 } as const satisfies Record<DeepZoomBackendId, ReferenceBackend>;
 
 export function getReferenceBackend(backend: DeepZoomBackendId): ReferenceBackend {
@@ -232,6 +321,18 @@ function numericScale(value: ComplexValue, scalar: number): ComplexValue {
   return [value[0] * scalar, value[1] * scalar];
 }
 
+function numericSubtract(left: ComplexValue, right: ComplexValue): ComplexValue {
+  return [left[0] - right[0], left[1] - right[1]];
+}
+
+function numericDivide(numerator: ComplexValue, denominator: ComplexValue): ComplexValue {
+  const denominatorSquared = denominator[0] * denominator[0] + denominator[1] * denominator[1];
+  return [
+    (numerator[0] * denominator[0] + numerator[1] * denominator[1]) / denominatorSquared,
+    (numerator[1] * denominator[0] - numerator[0] * denominator[1]) / denominatorSquared,
+  ];
+}
+
 function numericConjugate(value: ComplexValue): ComplexValue {
   return [value[0], -value[1]];
 }
@@ -259,6 +360,29 @@ export function iteratePerturbation(
   planeDelta: ComplexValue,
   parameters: Readonly<Record<string, FractalParameterValue>>,
 ): NumericPerturbationState {
+  if (backend === "newton-cubic-perturbation" || backend === "nova-cubic-perturbation") {
+    const actual = numericAdd(reference.current, delta.current);
+    const numerator = numericMultiply(
+      delta.current,
+      numericAdd(numericScale(reference.current, 2), delta.current),
+    );
+    const denominator = numericMultiply(numericSquare(reference.current), numericSquare(actual));
+    const reciprocalDifference = numericDivide(numerator, denominator);
+    const correctionDelta = numericScale(numericAdd(delta.current, reciprocalDifference), 1 / 3);
+    const relaxationValue = parameters.relaxation;
+    const relaxation =
+      backend === "nova-cubic-perturbation" &&
+      typeof relaxationValue === "number" &&
+      Number.isFinite(relaxationValue)
+        ? relaxationValue
+        : 1;
+    const next = numericSubtract(delta.current, numericScale(correctionDelta, relaxation));
+    return {
+      current: backend === "nova-cubic-perturbation" ? numericAdd(next, planeDelta) : next,
+      previous: delta.current,
+    };
+  }
+
   if (backend === "phoenix-perturbation") {
     const memoryValue = parameters.memory;
     const memory =
@@ -327,7 +451,9 @@ export function initialPerturbationState(
 ): NumericPerturbationState {
   return {
     current:
-      backend === "julia-perturbation" || backend === "phoenix-perturbation"
+      backend === "julia-perturbation" ||
+      backend === "phoenix-perturbation" ||
+      backend === "newton-cubic-perturbation"
         ? planeDelta
         : ZERO_COMPLEX_PARAMETER,
     previous: ZERO_COMPLEX_PARAMETER,

@@ -176,7 +176,15 @@ export class DeepZoomRenderer {
               ["constant", "u_phoenixConstant"],
               ["memory", "u_phoenixMemory"],
             ]
-          : [];
+          : backend === "newton-cubic-perturbation"
+            ? [["tolerance", "u_convergenceTolerance"]]
+            : backend === "nova-cubic-perturbation"
+              ? [
+                  ["relaxation", "u_novaRelaxation"],
+                  ["escapeRadius", "u_novaEscapeRadius"],
+                  ["tolerance", "u_convergenceTolerance"],
+                ]
+              : [];
     for (const [key, uniformName] of parameterNames) {
       parameterUniforms.set(key, getUniform(this.#gl, program, uniformName));
     }

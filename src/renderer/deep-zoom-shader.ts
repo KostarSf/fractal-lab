@@ -1,5 +1,6 @@
-import type { DeepZoomBackendId } from "../fractals/types.ts";
+import type { DeepZoomBackendId, EscapeTimeDeepZoomBackendId } from "../fractals/types.ts";
 import { ESCAPE_SMOOTHING_ITERATIONS } from "../fractals/coloring.ts";
+import { createDeepZoomBasinFragmentShader } from "./deep-zoom-basin-shader.ts";
 
 const MAX_ITERATIONS = 2_048;
 const MAX_SHADER_ITERATIONS = MAX_ITERATIONS + ESCAPE_SMOOTHING_ITERATIONS;
@@ -132,13 +133,19 @@ const DEEP_ZOOM_SHADER_BACKENDS = {
       deltaPrevious = subtractReference(actualPreviousZ, referenceStartPrevious);
     `,
   },
-} as const satisfies Record<DeepZoomBackendId, DeepZoomShaderBackend>;
+} as const satisfies Record<EscapeTimeDeepZoomBackendId, DeepZoomShaderBackend>;
 
 export function deepZoomTexelsPerIteration(backend: DeepZoomBackendId): 1 | 2 {
+  if (backend === "newton-cubic-perturbation" || backend === "nova-cubic-perturbation") {
+    return 1;
+  }
   return DEEP_ZOOM_SHADER_BACKENDS[backend].texelsPerIteration;
 }
 
 export function createDeepZoomFragmentShader(backendId: DeepZoomBackendId): string {
+  if (backendId === "newton-cubic-perturbation" || backendId === "nova-cubic-perturbation") {
+    return createDeepZoomBasinFragmentShader(backendId);
+  }
   const backend = DEEP_ZOOM_SHADER_BACKENDS[backendId];
   const referencePrevious =
     backend.texelsPerIteration === 2 ? "fetchReference(referenceIndex, 1)" : "vec4(0.0)";

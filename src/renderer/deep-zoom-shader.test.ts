@@ -6,15 +6,29 @@ describe("deep zoom shader registry", () => {
   it("generates a complete shader for every registered backend", () => {
     for (const backend of DEEP_ZOOM_BACKEND_IDS) {
       const shader = createDeepZoomFragmentShader(backend);
+      const isRootBasin =
+        backend === "newton-cubic-perturbation" || backend === "nova-cubic-perturbation";
       expect(shader).toContain("#version 300 es");
       expect(shader).toContain("if (u_smoothColors)");
-      expect(shader).toContain("ivec2(component, index)");
       expect(deepZoomTexelsPerIteration(backend)).toBeGreaterThanOrEqual(1);
-      expect(shader).toContain("if (referenceExhausted || closerToCriticalPoint)");
-      expect(shader).toContain("maxNorm(actualZ) < maxNorm(deltaCurrent)");
       expect(shader).not.toContain("forceRebase");
-      expect(shader).toContain("int postEscapeIterations = 0;");
-      expect(shader).toContain("float(postEscapeIterations)");
+      if (backend === "newton-cubic-perturbation") {
+        expect(shader).toContain("normalizeExtendedDelta(");
+        expect(shader).toContain("calculateNewtonPerturbationFactor(");
+        expect(shader).not.toContain("referenceExhausted");
+      } else {
+        expect(shader).toContain("if (referenceExhausted || closerToCriticalPoint)");
+        expect(shader).toContain("maxNorm(actualZ) < maxNorm(");
+      }
+      if (isRootBasin) {
+        expect(shader).toContain("ivec2(0, index)");
+        expect(shader).toContain("int resultKind = 0;");
+        expect(shader).not.toContain("postEscapeIterations");
+      } else {
+        expect(shader).toContain("ivec2(component, index)");
+        expect(shader).toContain("int postEscapeIterations = 0;");
+        expect(shader).toContain("float(postEscapeIterations)");
+      }
     }
   });
 
@@ -36,5 +50,21 @@ describe("deep zoom shader registry", () => {
     expect(phoenix).toContain(
       "deltaPrevious = subtractReference(actualPreviousZ, referenceStartPrevious);",
     );
+
+    const newton = createDeepZoomFragmentShader("newton-cubic-perturbation");
+    expect(newton).toContain("const float INITIAL_DELTA_EXPONENT = -96.0;");
+    expect(newton).toContain("u_scale * INITIAL_DELTA_SCALE");
+    expect(newton).toContain("complexMultiply(deltaMantissa, newtonFactor)");
+    expect(newton).toContain("stableComplexDivideInPlace(reciprocalTerm, reference)");
+    expect(newton).toContain("if (exponent < -120.0)");
+    expect(newton).not.toContain("subtractReference(actualZ, fetchReference(0))");
+    expect(newton).toContain("quadraticConvergencePhase(");
+
+    const nova = createDeepZoomFragmentShader("nova-cubic-perturbation");
+    expect(nova).toContain("uniform float u_novaRelaxation;");
+    expect(nova).toContain("calculateCorrectionDelta(");
+    expect(nova).toContain("u_novaRelaxation * correctionDelta");
+    expect(nova).toContain("planeDelta;");
+    expect(nova).toContain("thresholdCrossingPhase(previousMetric, finalMetric");
   });
 });

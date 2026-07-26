@@ -130,4 +130,68 @@ describe("reference orbit", () => {
     expect(orbitPoint(result, 1, 1)[0]).toBeCloseTo(0.2, 14);
     expect(orbitPoint(result, 2, 0)[0]).toBeCloseTo(0.6916, 14);
   });
+
+  it("calculates a cubic Newton reference orbit from the plane point", () => {
+    const result = calculateReferenceOrbit({
+      requestId: 8,
+      backend: "newton-cubic-perturbation",
+      parameters: { tolerance: 1e-5 },
+      center: ["2", "0"],
+      scale: "1e-20",
+      maxIterations: 2,
+      viewportAspect: 1,
+    });
+
+    expect(orbitPoint(result, 0)).toEqual([2, 0]);
+    expect(orbitPoint(result, 1)[0]).toBeCloseTo(17 / 12, 14);
+    expect(orbitPoint(result, 1)[1]).toBe(0);
+  });
+
+  it("calculates a relaxed Nova reference orbit with the plane point as c", () => {
+    const result = calculateReferenceOrbit({
+      requestId: 9,
+      backend: "nova-cubic-perturbation",
+      parameters: { relaxation: 0.5, escapeRadius: 32, tolerance: 1e-5 },
+      center: ["0.1", "0"],
+      scale: "1e-20",
+      maxIterations: 2,
+      viewportAspect: 1,
+    });
+
+    expect(orbitPoint(result, 0)).toEqual([1, 0]);
+    expect(orbitPoint(result, 1)[0]).toBeCloseTo(1.1, 14);
+    expect(orbitPoint(result, 1)[1]).toBe(0);
+    expect(orbitPoint(result, 2)[0]).toBeCloseTo(1.1544077134986226, 14);
+  });
+
+  it("skips a singular Newton center when selecting the viewport reference", () => {
+    const result = calculateBestReferenceOrbit({
+      requestId: 10,
+      backend: "newton-cubic-perturbation",
+      parameters: { tolerance: 1e-5 },
+      center: ["0", "0"],
+      scale: "1e-3",
+      maxIterations: 20,
+      viewportAspect: 1,
+    });
+
+    expect(result.center).not.toEqual(["0", "0"]);
+    expect(result.orbitLength).toBeGreaterThan(1);
+  });
+
+  it("keeps the reported deep Newton reference finite through the iteration budget", () => {
+    const result = calculateReferenceOrbit({
+      requestId: 11,
+      backend: "newton-cubic-perturbation",
+      parameters: { tolerance: 1e-5 },
+      center: ["1.261734435999730917660226160714876", "1.532704545089778066177656844939145"],
+      scale: "1.8691588785046728972e-30",
+      maxIterations: 235,
+      viewportAspect: 1.47,
+    });
+
+    expect(result.precisionDigits).toBe(70);
+    expect(result.orbitLength).toBe(236);
+    expect(result.values.every(Number.isFinite)).toBe(true);
+  });
 });

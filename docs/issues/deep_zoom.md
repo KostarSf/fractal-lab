@@ -2,7 +2,7 @@
 
 ## Статус
 
-Реализовано для всех текущих escape-time формул.
+Реализовано для всех текущих escape-time и root-basin формул.
 
 Начиная с увеличения `10 000×` просмотрщик автоматически переключается с
 обычного escape-time shader на perturbation renderer. Порог сравнивается с
@@ -78,8 +78,9 @@ deep-zoom backend можно подключить явно.
 backend с аналогичной программной арифметикой.
 
 Perturbation metadata и отдельные backend'ы добавлены всем текущим escape-time
-формулам. Архитектура и формулозависимые рекуррентности описаны в
-[отдельном issue](./deep_zoom_remaining_formulas.md).
+формулам, Newton и Nova. Архитектура escape-time backend'ов описана в
+[отдельном issue](./deep_zoom_remaining_formulas.md), а рекуррентности
+бассейнов — в [заметке про root basins](./deep_zoom_root_basins.md).
 
 ## Проверка критериев
 

@@ -31,7 +31,7 @@ const attractorError = ref("");
 
 const deepZoomBackend = computed<DeepZoomBackendId | undefined>(() => {
   const formula = store.activeFormula;
-  if (formula.renderer !== "escape-time" || !hasDeepZoomBackend(formula.deepZoom?.backend)) {
+  if (!hasDeepZoomBackend(formula.deepZoom?.backend)) {
     return undefined;
   }
   return formula.deepZoom.backend;
@@ -41,7 +41,7 @@ const deepZoomMode = computed(() => {
 });
 const deepZoomLimitReached = computed(() => {
   const formula = store.activeFormula;
-  const limit = formula.renderer === "escape-time" ? formula.deepZoom?.maxMagnification : undefined;
+  const limit = formula.deepZoom?.maxMagnification;
   return limit !== undefined && store.magnification >= limit * (1 - 1e-12);
 });
 const attractorMode = computed(() => store.activeFormula.renderer === "point-attractor");
@@ -50,10 +50,7 @@ const deepZoomLabel = computed(() => {
     return "Подготовка опорной орбиты…";
   }
   if (deepZoomStatus.value === "ready") {
-    const limit =
-      store.activeFormula.renderer === "escape-time"
-        ? store.activeFormula.deepZoom?.maxMagnification
-        : undefined;
+    const limit = store.activeFormula.deepZoom?.maxMagnification;
     if (deepZoomLimitReached.value && limit !== undefined) {
       return `Deep zoom · предел ${limit.toExponential(2)}×`;
     }
@@ -531,8 +528,16 @@ function deepZoomParameterSignature(
     return "";
   }
 
-  return `${backend}|${Object.keys(parameters)
-    .sort()
+  const orbitParameterKeys =
+    backend === "julia-perturbation"
+      ? ["constant"]
+      : backend === "phoenix-perturbation"
+        ? ["constant", "memory"]
+        : backend === "nova-cubic-perturbation"
+          ? ["relaxation"]
+          : [];
+
+  return `${backend}|${orbitParameterKeys
     .map((key) => `${key}:${JSON.stringify(parameters[key])}`)
     .join("|")}`;
 }

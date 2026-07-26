@@ -41,6 +41,16 @@ describe("fractal store", () => {
     store.setCamera([1, -1], 1e-100);
     expect(store.scale).toBe(3.2000000000000003e-35);
     expect(store.magnification).toBe(1e35);
+
+    store.selectFormula("newton");
+    store.setCamera([1, -1], 1e-100);
+    expect(store.scale).toBe(4e-35);
+    expect(store.magnification).toBe(1e35);
+
+    store.selectFormula("nova");
+    store.setCamera([1, -1], 1e-100);
+    expect(store.scale).toBeCloseTo(3.6e-35, 14);
+    expect(store.magnification).toBe(1e35);
   });
 
   it("updates parameters immutably", () => {

@@ -46,12 +46,16 @@ export interface ComplexParameter extends ParameterBase {
 export type FractalParameter = NumberParameter | ComplexParameter;
 export type FractalParameterValue = number | ComplexValue;
 
-export type DeepZoomBackendId =
+export type EscapeTimeDeepZoomBackendId =
   | "mandelbrot-perturbation"
   | "julia-perturbation"
   | "tricorn-perturbation"
   | "burning-ship-perturbation"
   | "phoenix-perturbation";
+
+export type RootBasinDeepZoomBackendId = "newton-cubic-perturbation" | "nova-cubic-perturbation";
+
+export type DeepZoomBackendId = EscapeTimeDeepZoomBackendId | RootBasinDeepZoomBackendId;
 
 interface FractalFormulaBase {
   readonly id: string;
@@ -61,16 +65,16 @@ interface FractalFormulaBase {
   readonly preview: FractalPreview;
   readonly iterationControl?: IterationControl;
   readonly parameters: readonly FractalParameter[];
+  readonly deepZoom?: {
+    readonly backend: DeepZoomBackendId;
+    readonly maxMagnification?: number;
+  };
 }
 
 export interface EscapeTimeFormula extends FractalFormulaBase {
   readonly renderer: "escape-time";
   readonly suggestedIterations: number;
   readonly escapePower: number;
-  readonly deepZoom?: {
-    readonly backend: DeepZoomBackendId;
-    readonly maxMagnification?: number;
-  };
   readonly shader: {
     /**
      * Must declare at least `vec2 z`. `point` contains the complex coordinate

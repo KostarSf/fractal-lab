@@ -33,6 +33,19 @@ function scale(value: ComplexValue, factor: number): ComplexValue {
   return [value[0] * factor, value[1] * factor];
 }
 
+function divide(numerator: ComplexValue, denominator: ComplexValue): ComplexValue {
+  const denominatorSquared = denominator[0] * denominator[0] + denominator[1] * denominator[1];
+  return [
+    (numerator[0] * denominator[0] + numerator[1] * denominator[1]) / denominatorSquared,
+    (numerator[1] * denominator[0] - numerator[0] * denominator[1]) / denominatorSquared,
+  ];
+}
+
+function cubicCorrection(value: ComplexValue): ComplexValue {
+  const squared = square(value);
+  return divide(subtract(multiply(squared, value), [1, 0]), scale(squared, 3));
+}
+
 function expectComplex(actual: ComplexValue, expected: ComplexValue): void {
   expect(actual[0]).toBeCloseTo(expected[0], 14);
   expect(actual[1]).toBeCloseTo(expected[1], 14);
@@ -61,6 +74,8 @@ describe("perturbation backends", () => {
     ["mandelbrot-perturbation", ZERO],
     ["tricorn-perturbation", ZERO],
     ["burning-ship-perturbation", ZERO],
+    ["newton-cubic-perturbation", [0.01, -0.02]],
+    ["nova-cubic-perturbation", ZERO],
   ] satisfies readonly (readonly [DeepZoomBackendId, ComplexValue])[])(
     "uses the correct initial delta for %s",
     (backend, expected) => {
@@ -152,5 +167,38 @@ describe("perturbation backends", () => {
 
     expectComplex(result.current, expected);
     expect(result.previous).toEqual(delta.current);
+  });
+
+  it("matches a direct cubic Newton step", () => {
+    const reference = state([0.8, 0.3]);
+    const delta = state([0.002, -0.004]);
+    const result = iteratePerturbation("newton-cubic-perturbation", reference, delta, ZERO, {});
+    const newtonStep = (value: ComplexValue): ComplexValue =>
+      subtract(value, cubicCorrection(value));
+    const expected = subtract(
+      newtonStep(add(reference.current, delta.current)),
+      newtonStep(reference.current),
+    );
+
+    expectComplex(result.current, expected);
+  });
+
+  it("matches a direct Nova step including the plane delta", () => {
+    const reference = state([1.2, -0.1]);
+    const delta = state([-0.003, 0.005]);
+    const planeDelta: ComplexValue = [0.0002, -0.0004];
+    const relaxation = 0.85;
+    const result = iteratePerturbation("nova-cubic-perturbation", reference, delta, planeDelta, {
+      relaxation,
+    });
+    const novaStep = (value: ComplexValue, planePoint: ComplexValue): ComplexValue =>
+      add(subtract(value, scale(cubicCorrection(value), relaxation)), planePoint);
+    const referencePlanePoint: ComplexValue = [0.1, 0.02];
+    const expected = subtract(
+      novaStep(add(reference.current, delta.current), add(referencePlanePoint, planeDelta)),
+      novaStep(reference.current, referencePlanePoint),
+    );
+
+    expectComplex(result.current, expected);
   });
 });
