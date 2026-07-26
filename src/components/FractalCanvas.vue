@@ -81,6 +81,7 @@ let geometricIfsRenderer: GeometricIfsRenderer | undefined;
 let deepRenderer: DeepZoomRenderer | undefined;
 let referenceOrbit: ReferenceOrbitResult | undefined;
 let referenceOrbitSignature = "";
+let attractorPoints: Float32Array | undefined;
 const referenceOrbitClient = new ReferenceOrbitClient();
 const cliffordTrajectoryClient = new CliffordTrajectoryClient();
 let resizeObserver: ResizeObserver | undefined;
@@ -203,6 +204,7 @@ function handleContextLost(event: Event): void {
   geometricIfsRenderer = undefined;
   deepRenderer = undefined;
   referenceOrbit = undefined;
+  attractorPoints = undefined;
   referenceOrbitClient.cancel();
   cliffordTrajectoryClient.cancel();
   errorMessage.value = "Контекст WebGL потерян. Ожидаем восстановления GPU.";
@@ -230,6 +232,171 @@ function disposeRenderers(): void {
   cliffordRenderer = undefined;
   geometricIfsRenderer = undefined;
   deepRenderer = undefined;
+}
+
+async function exportPng(): Promise<void> {
+  if (!canvas.value) {
+    throw new Error("Canvas фрактала ещё не готов к экспорту.");
+  }
+
+  errorMessage.value = "";
+  const sourceWidth = Math.max(1, Math.round(canvas.value.clientWidth));
+  const sourceHeight = Math.max(1, Math.round(canvas.value.clientHeight));
+  const outputWidth = sourceWidth * 2;
+  const outputHeight = sourceHeight * 2;
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = outputWidth;
+  exportCanvas.height = outputHeight;
+  exportCanvas.style.position = "fixed";
+  exportCanvas.style.left = "-100000px";
+  exportCanvas.style.top = "0";
+  exportCanvas.style.width = `${sourceWidth}px`;
+  exportCanvas.style.height = `${sourceHeight}px`;
+  exportCanvas.style.pointerEvents = "none";
+  document.body.append(exportCanvas);
+
+  let exportRenderer: { dispose(): void } | undefined;
+
+  try {
+    const formula = store.activeFormula;
+    const backend = deepZoomBackend.value;
+    const parameterSignature = deepZoomParameterSignature(backend, store.parameterValues);
+
+    if (
+      deepZoomMode.value &&
+      backend &&
+      referenceOrbit?.backend === backend &&
+      referenceOrbitSignature === parameterSignature
+    ) {
+      const renderer = new DeepZoomRenderer(exportCanvas);
+      exportRenderer = renderer;
+      renderer.setReferenceOrbit(referenceOrbit);
+      renderer.render({
+        backend,
+        centerDelta: [
+          decimalDifferenceToNumber(
+            store.exactCenter[0],
+            referenceOrbit.center[0],
+            store.exactScale,
+          ),
+          decimalDifferenceToNumber(
+            store.exactCenter[1],
+            referenceOrbit.center[1],
+            store.exactScale,
+          ),
+        ],
+        scale: Number(store.exactScale),
+        maxIterations: store.maxIterations,
+        palette: store.palette,
+        colorDensity: store.colorDensity,
+        colorOffset: store.colorOffset,
+        smoothColors: store.smoothColors,
+        parameters: store.parameterValues,
+      });
+    } else if (formula.renderer === "escape-time") {
+      const renderer = new FractalRenderer(exportCanvas);
+      exportRenderer = renderer;
+      renderer.setFormula(formula);
+      renderer.render({
+        center: store.center,
+        scale: store.scale,
+        maxIterations: store.maxIterations,
+        palette: store.palette,
+        colorDensity: store.colorDensity,
+        colorOffset: store.colorOffset,
+        smoothColors: store.smoothColors,
+        parameters: store.parameterValues,
+      });
+    } else if (formula.renderer === "root-basin") {
+      const renderer = new BasinRenderer(exportCanvas);
+      exportRenderer = renderer;
+      renderer.setFormula(formula);
+      renderer.render({
+        center: store.center,
+        scale: store.scale,
+        maxIterations: store.maxIterations,
+        palette: store.palette,
+        colorDensity: store.colorDensity,
+        colorOffset: store.colorOffset,
+        smoothColors: store.smoothColors,
+        parameters: store.parameterValues,
+      });
+    } else if (formula.renderer === "point-attractor") {
+      if (!attractorPoints) {
+        throw new Error("Траектория аттрактора ещё не готова к экспорту.");
+      }
+      const renderer = new CliffordRenderer(exportCanvas);
+      exportRenderer = renderer;
+      renderer.setPoints(attractorPoints);
+      renderer.render({
+        center: store.center,
+        scale: store.scale,
+        palette: store.palette,
+        colorOffset: store.colorOffset,
+        exposure: numberParameter("exposure", 0.045),
+        pointSize: numberParameter("pointSize", 1.25),
+        pointFraction: 1,
+      });
+    } else {
+      const renderer = new GeometricIfsRenderer(exportCanvas);
+      exportRenderer = renderer;
+      renderer.setFormula(formula);
+      renderer.render({
+        center: store.center,
+        scale: store.scale,
+        recursionDepthMode: store.recursionDepthMode,
+        recursionDepth: store.recursionDepth,
+        coloring: store.geometricColoring,
+        palette: store.palette,
+        colorOffset: store.colorOffset,
+      });
+    }
+
+    const gl = exportCanvas.getContext("webgl2");
+    if (!gl || gl.drawingBufferWidth !== outputWidth || gl.drawingBufferHeight !== outputHeight) {
+      throw new Error(
+        `GPU не поддерживает экспорт ${outputWidth.toLocaleString("ru-RU")} × ${outputHeight.toLocaleString("ru-RU")} px.`,
+      );
+    }
+
+    const blob = await canvasToPng(exportCanvas);
+    downloadBlob(blob, createExportFilename(formula.id, outputWidth, outputHeight));
+  } catch (error) {
+    showError(error);
+    throw error;
+  } finally {
+    exportRenderer?.dispose();
+    exportCanvas.remove();
+  }
+}
+
+function canvasToPng(source: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    source.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("Браузер не смог создать PNG из текущего вида."));
+      }
+    }, "image/png");
+  });
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+function createExportFilename(formulaId: string, width: number, height: number): string {
+  const timestamp = new Date()
+    .toISOString()
+    .replaceAll(":", "-")
+    .replace(/\.\d{3}Z$/, "Z");
+  return `fractal-${formulaId}-${timestamp}-${width}x${height}.png`;
 }
 
 function showError(error: unknown): void {
@@ -578,6 +745,7 @@ function scheduleCliffordTrajectory(): void {
 
   if (!attractorMode.value) {
     cliffordRenderer?.clearPoints();
+    attractorPoints = undefined;
     attractorStatus.value = "idle";
     attractorPointCount.value = 0;
     return;
@@ -614,6 +782,7 @@ async function prepareCliffordTrajectory(): Promise<void> {
     }
 
     cliffordRenderer?.setPoints(result.values);
+    attractorPoints = result.values;
     attractorPointCount.value = result.pointCount;
     attractorStatus.value = "ready";
     scheduleRender();
@@ -650,6 +819,10 @@ function getGestureMetrics():
     distance: Math.hypot(second[0] - first[0], second[1] - first[1]),
   };
 }
+
+defineExpose({
+  exportPng,
+});
 </script>
 
 <template>

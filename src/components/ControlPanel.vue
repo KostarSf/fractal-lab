@@ -4,6 +4,15 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useFractalStore } from "../stores/fractal.ts";
 import FormulaPickerDialog from "./FormulaPickerDialog.vue";
 
+defineProps<{
+  exporting: boolean;
+}>();
+
+const emit = defineEmits<{
+  exportPng: [];
+  hide: [];
+}>();
+
 const store = useFractalStore();
 const {
   activeFormula,
@@ -111,16 +120,42 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
         <span class="eyebrow">Исследование</span>
         <h1>Параметры</h1>
       </div>
-      <button
-        class="icon-button"
-        type="button"
-        aria-label="Сбросить вид"
-        title="Сбросить вид"
-        @click="store.resetCamera"
-      >
+      <div class="heading-actions">
+        <button
+          class="icon-button"
+          type="button"
+          aria-label="Сбросить вид"
+          title="Сбросить вид"
+          @click="store.resetCamera"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4.9 6.8A8.5 8.5 0 1 1 3.6 15M4 4v4h4" />
+          </svg>
+        </button>
+        <button
+          class="icon-button"
+          type="button"
+          aria-label="Скрыть панель параметров"
+          title="Скрыть панель"
+          @click="emit('hide')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 5 3 12l5 7M3.5 12H21" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="panel-actions">
+      <button class="export-button" type="button" :disabled="exporting" @click="emit('exportPng')">
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4.9 6.8A8.5 8.5 0 1 1 3.6 15M4 4v4h4" />
+          <path d="M12 3v12m-4-4 4 4 4-4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
         </svg>
+        <span>
+          <strong>{{ exporting ? "Готовим PNG…" : "Сохранить PNG" }}</strong>
+          <small>Чистый рендер · разрешение 2×</small>
+        </span>
+        <i v-if="exporting" aria-hidden="true"></i>
       </button>
     </div>
 
@@ -292,6 +327,91 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
 </template>
 
 <style scoped>
+.heading-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.panel-actions {
+  padding: 0 20px 23px;
+}
+
+.export-button {
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border: 1px solid rgb(182 156 255 / 20%);
+  border-radius: 10px;
+  color: #bfb2e4;
+  background:
+    linear-gradient(135deg, rgb(182 156 255 / 9%), rgb(118 145 222 / 4%)), rgb(255 255 255 / 2%);
+  text-align: left;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    transform 150ms ease;
+}
+
+.export-button:hover:not(:disabled) {
+  border-color: rgb(182 156 255 / 38%);
+  background:
+    linear-gradient(135deg, rgb(182 156 255 / 14%), rgb(118 145 222 / 7%)), rgb(255 255 255 / 3%);
+  transform: translateY(-1px);
+}
+
+.export-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.export-button > svg {
+  width: 17px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.export-button > span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.export-button strong {
+  color: #d8cef3;
+  font-size: 10px;
+  font-weight: 550;
+}
+
+.export-button small {
+  color: #706b7c;
+  font: 8px/1 var(--mono);
+}
+
+.export-button > i {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border: 1px solid rgb(216 206 243 / 25%);
+  border-top-color: #d8cef3;
+  border-radius: 50%;
+  animation: export-spin 700ms linear infinite;
+}
+
+@keyframes export-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .formula-picker-field {
   margin-bottom: 20px;
 }

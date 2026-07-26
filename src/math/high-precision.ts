@@ -49,6 +49,45 @@ export function createSerializedCamera(center: ComplexValue, scale: number): Ser
   };
 }
 
+export function createCameraFromMagnification(
+  center: readonly [DecimalString, DecimalString],
+  magnification: DecimalString,
+  initialScale: number,
+): SerializedCamera {
+  const D = Decimal.clone({
+    precision: MAX_PRECISION_DIGITS,
+    rounding: Decimal.ROUND_HALF_EVEN,
+    toExpNeg: -1_000,
+    toExpPos: 1_000,
+  });
+  const real = new D(center[0]);
+  const imaginary = new D(center[1]);
+  const zoom = new D(magnification);
+
+  if (
+    !real.isFinite() ||
+    !imaginary.isFinite() ||
+    !Number.isFinite(real.toNumber()) ||
+    !Number.isFinite(imaginary.toNumber())
+  ) {
+    throw new Error("Координаты должны быть конечными числами.");
+  }
+  if (!zoom.isFinite() || zoom.lte(0)) {
+    throw new Error("Масштаб должен быть положительным конечным числом.");
+  }
+
+  return {
+    center: [real.toString(), imaginary.toString()],
+    scale: new D(initialScale.toString()).dividedBy(zoom).toString(),
+  };
+}
+
+export function magnificationForScale(initialScale: number, scale: DecimalString): DecimalString {
+  const D = decimalContext(scale);
+  const magnification = new D(initialScale.toString()).dividedBy(scale);
+  return Math.abs(magnification.e) >= 12 ? magnification.toExponential() : magnification.toString();
+}
+
 export function clampCameraScale(
   camera: SerializedCamera,
   minimumScale: DecimalString = MIN_CAMERA_SCALE,

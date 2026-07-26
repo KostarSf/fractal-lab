@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  createCameraFromMagnification,
   createSerializedCamera,
   decimalDifferenceToNumber,
+  magnificationForScale,
   precisionForScale,
   shouldUseDeepZoom,
   transformCamera,
@@ -63,5 +65,26 @@ describe("high precision camera", () => {
     expect(shouldUseDeepZoom(9_999.999)).toBe(false);
     expect(shouldUseDeepZoom(10_000)).toBe(true);
     expect(shouldUseDeepZoom(1_000_000)).toBe(true);
+  });
+
+  it("converts exact magnification to camera scale and back", () => {
+    const camera = createCameraFromMagnification(
+      ["-0.743643887037151", "0.13182590420533"],
+      "1000000000000000000000000000000",
+      3.1,
+    );
+
+    expect(camera.center).toEqual(["-0.743643887037151", "0.13182590420533"]);
+    expect(camera.scale).toBe("0.0000000000000000000000000000031");
+    expect(magnificationForScale(3.1, camera.scale)).toBe("1e+30");
+  });
+
+  it("rejects invalid exact camera values", () => {
+    expect(() => createCameraFromMagnification(["0", "0"], "0", 3.1)).toThrow(
+      "Масштаб должен быть положительным",
+    );
+    expect(() => createCameraFromMagnification(["Infinity", "0"], "1", 3.1)).toThrow(
+      "Координаты должны быть конечными",
+    );
   });
 });
