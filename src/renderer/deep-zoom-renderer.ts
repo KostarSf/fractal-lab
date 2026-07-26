@@ -112,6 +112,7 @@ export class DeepZoomRenderer {
     }
 
     const gl = this.#gl;
+    gl.disable(gl.BLEND);
     gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
     gl.useProgram(this.#program);
     gl.bindVertexArray(this.#vertexArray);
@@ -130,5 +131,11 @@ export class DeepZoomRenderer {
     gl.uniform1i(this.#uniforms.get("u_referenceCount")!, this.#referenceCount);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  dispose(): void {
+    this.#gl.deleteTexture(this.#orbitTexture);
+    this.#gl.deleteVertexArray(this.#vertexArray);
+    this.#gl.deleteProgram(this.#program);
   }
 }

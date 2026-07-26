@@ -1,18 +1,32 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
+import { computed } from "vue";
 import { FRACTAL_FORMULAS } from "../fractals/formulas.ts";
 import { useFractalStore } from "../stores/fractal.ts";
 
 const store = useFractalStore();
 const { activeFormula, colorDensity, maxIterations, palette, parameterValues, smoothColors } =
   storeToRefs(store);
+const rendererLabel = computed(() => {
+  if (activeFormula.value.renderer === "root-basin") {
+    return "GPU root-basin renderer";
+  }
+  if (activeFormula.value.renderer === "point-attractor") {
+    return "Worker + GPU point renderer";
+  }
+  return "GPU escape-time renderer";
+});
 
 function eventValue(event: Event): string {
   return (event.target as HTMLInputElement | HTMLSelectElement).value;
 }
 
 function eventNumber(event: Event): number | undefined {
-  const value = Number(eventValue(event));
+  const rawValue = eventValue(event);
+  if (rawValue.trim() === "") {
+    return undefined;
+  }
+  const value = Number(rawValue);
   return Number.isFinite(value) ? value : undefined;
 }
 
@@ -118,6 +132,8 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
             <input
               type="number"
               :step="parameter.step"
+              :min="parameter.min"
+              :max="parameter.max"
               :value="numberParameter(parameter.key)"
               @input="updateNumberParameter(parameter.key, $event)"
             />
@@ -127,18 +143,18 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
 
       <div class="section-rule"></div>
 
-      <label class="field range-field">
+      <label v-if="activeFormula.iterationControl" class="field range-field">
         <span>
-          <span>Итерации</span>
+          <span>{{ activeFormula.iterationControl.label }}</span>
           <output for="iterations">{{ maxIterations }}</output>
         </span>
         <input
           id="iterations"
           v-model.number="maxIterations"
           type="range"
-          min="40"
-          max="1500"
-          step="10"
+          :min="activeFormula.iterationControl.min"
+          :max="activeFormula.iterationControl.max"
+          :step="activeFormula.iterationControl.step"
         />
       </label>
 
@@ -154,7 +170,7 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
         </span>
       </label>
 
-      <label class="toggle-field">
+      <label v-if="activeFormula.renderer !== 'point-attractor'" class="toggle-field">
         <span>
           <span>Сглаживание</span>
           <small>Плавные переходы между итерациями</small>
@@ -162,7 +178,7 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
         <input v-model="smoothColors" type="checkbox" role="switch" aria-label="Сглаживать цвета" />
       </label>
 
-      <label class="field range-field">
+      <label v-if="activeFormula.renderer !== 'point-attractor'" class="field range-field">
         <span>
           <span>Плотность цвета</span>
           <output for="color-density">{{ colorDensity.toFixed(3) }}</output>
@@ -180,7 +196,7 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
 
     <footer class="controls-footer">
       <span class="gpu-status"><i aria-hidden="true"></i> WebGL2</span>
-      <span>GPU escape-time renderer</span>
+      <span>{{ rendererLabel }}</span>
     </footer>
   </aside>
 </template>

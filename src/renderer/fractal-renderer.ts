@@ -1,5 +1,5 @@
 import { createFragmentShader, VERTEX_SHADER } from "../fractals/shader.ts";
-import type { ComplexValue, FractalFormula, FractalParameterValue } from "../fractals/types.ts";
+import type { ComplexValue, EscapeTimeFormula, FractalParameterValue } from "../fractals/types.ts";
 
 export interface RenderState {
   readonly center: ComplexValue;
@@ -94,7 +94,7 @@ export class FractalRenderer {
   readonly #gl: WebGL2RenderingContext;
   readonly #vertexArray: WebGLVertexArrayObject;
 
-  #formula: FractalFormula | undefined;
+  #formula: EscapeTimeFormula | undefined;
   #program: WebGLProgram | undefined;
   #uniforms = new Map<RequiredUniform, WebGLUniformLocation>();
   #parameterUniforms = new Map<string, WebGLUniformLocation>();
@@ -124,7 +124,7 @@ export class FractalRenderer {
     gl.bindVertexArray(vertexArray);
   }
 
-  setFormula(formula: FractalFormula): void {
+  setFormula(formula: EscapeTimeFormula): void {
     const program = createWebGLProgram(this.#gl, VERTEX_SHADER, createFragmentShader(formula));
     const uniforms = new Map<RequiredUniform, WebGLUniformLocation>();
     const parameterUniforms = new Map<string, WebGLUniformLocation>();
@@ -167,6 +167,7 @@ export class FractalRenderer {
     }
 
     const gl = this.#gl;
+    gl.disable(gl.BLEND);
     gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
     gl.useProgram(this.#program);
     gl.bindVertexArray(this.#vertexArray);
@@ -196,5 +197,13 @@ export class FractalRenderer {
     }
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  dispose(): void {
+    if (this.#program) {
+      this.#gl.deleteProgram(this.#program);
+      this.#program = undefined;
+    }
+    this.#gl.deleteVertexArray(this.#vertexArray);
   }
 }

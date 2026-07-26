@@ -1,4 +1,4 @@
-import type { FractalFormula } from "./types.ts";
+import type { EscapeTimeFormula } from "./types.ts";
 
 const MAX_ITERATIONS = 2048;
 
@@ -16,7 +16,7 @@ void main() {
 }
 `;
 
-function parameterDeclaration(formula: FractalFormula): string {
+function parameterDeclaration(formula: EscapeTimeFormula): string {
   return formula.parameters
     .map((parameter) => {
       const glslType = parameter.type === "complex" ? "vec2" : "float";
@@ -25,7 +25,7 @@ function parameterDeclaration(formula: FractalFormula): string {
     .join("\n");
 }
 
-export function createFragmentShader(formula: FractalFormula): string {
+export function createFragmentShader(formula: EscapeTimeFormula): string {
   return `#version 300 es
 precision highp float;
 

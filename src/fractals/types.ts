@@ -5,11 +5,21 @@ export interface FractalView {
   readonly scale: number;
 }
 
+export interface IterationControl {
+  readonly label: string;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
+}
+
 interface ParameterBase {
   readonly key: string;
   readonly label: string;
   readonly uniform: string;
   readonly step: number;
+  readonly min?: number;
+  readonly max?: number;
+  readonly affectsOrbit?: boolean;
 }
 
 export interface NumberParameter extends ParameterBase {
@@ -25,17 +35,22 @@ export interface ComplexParameter extends ParameterBase {
 export type FractalParameter = NumberParameter | ComplexParameter;
 export type FractalParameterValue = number | ComplexValue;
 
-export interface FractalFormula {
+interface FractalFormulaBase {
   readonly id: string;
   readonly label: string;
   readonly description: string;
   readonly initialView: FractalView;
   readonly suggestedIterations: number;
+  readonly iterationControl?: IterationControl;
+  readonly parameters: readonly FractalParameter[];
+}
+
+export interface EscapeTimeFormula extends FractalFormulaBase {
+  readonly renderer: "escape-time";
   readonly escapePower: number;
   readonly deepZoom?: {
     readonly backend: "mandelbrot-perturbation";
   };
-  readonly parameters: readonly FractalParameter[];
   readonly shader: {
     /**
      * Must declare at least `vec2 z`. `point` contains the complex coordinate
@@ -51,3 +66,15 @@ export interface FractalFormula {
     readonly escaped: string;
   };
 }
+
+export interface RootBasinFormula extends FractalFormulaBase {
+  readonly renderer: "root-basin";
+  readonly basinBackend: "newton-cubic" | "nova-cubic";
+}
+
+export interface PointAttractorFormula extends FractalFormulaBase {
+  readonly renderer: "point-attractor";
+  readonly attractorBackend: "clifford";
+}
+
+export type FractalFormula = EscapeTimeFormula | RootBasinFormula | PointAttractorFormula;

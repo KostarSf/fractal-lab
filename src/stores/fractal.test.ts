@@ -43,4 +43,34 @@ describe("fractal store", () => {
     expect(store.parameterValues).not.toBe(previous);
     expect(store.parameterValues.constant).toEqual([-0.4, 0.6]);
   });
+
+  it("restores root-basin and point-attractor defaults", () => {
+    const store = useFractalStore();
+
+    store.selectFormula("newton");
+    expect(store.activeFormula.renderer).toBe("root-basin");
+    expect(store.maxIterations).toBe(80);
+    expect(store.parameterValues.tolerance).toBe(0.00001);
+
+    store.selectFormula("clifford");
+    expect(store.activeFormula.renderer).toBe("point-attractor");
+    expect(store.parameterValues).toMatchObject({
+      a: -1.4,
+      b: 1.6,
+      c: 1,
+      d: 0.7,
+      pointCount: 500000,
+    });
+  });
+
+  it("clamps numeric formula parameters to their declared range", () => {
+    const store = useFractalStore();
+    store.selectFormula("clifford");
+
+    store.setParameter("pointCount", 10_000_000);
+    store.setParameter("exposure", -1);
+
+    expect(store.parameterValues.pointCount).toBe(2_000_000);
+    expect(store.parameterValues.exposure).toBe(0.005);
+  });
 });

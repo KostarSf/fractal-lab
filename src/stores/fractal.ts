@@ -139,7 +139,15 @@ export const useFractalStore = defineStore("fractal", {
     },
 
     setParameter(key: string, value: FractalParameterValue): void {
-      this.parameterValues = { ...this.parameterValues, [key]: value };
+      const parameter = this.activeFormula.parameters.find((candidate) => candidate.key === key);
+      let nextValue = value;
+      if (parameter?.type === "number" && typeof value === "number") {
+        nextValue = Math.max(
+          parameter.min ?? Number.NEGATIVE_INFINITY,
+          Math.min(parameter.max ?? Number.POSITIVE_INFINITY, value),
+        );
+      }
+      this.parameterValues = { ...this.parameterValues, [key]: nextValue };
     },
   },
 });
