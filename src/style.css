@@ -632,6 +632,39 @@ input[type="range"]::-moz-range-thumb {
   text-transform: uppercase;
 }
 
+.controls-footer a {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: #656670;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 150ms ease;
+}
+
+.controls-footer a:hover {
+  color: var(--accent-bright);
+}
+
+.controls-footer a:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid rgb(182 156 255 / 72%);
+  outline-offset: 3px;
+}
+
+.controls-footer a svg {
+  width: 11px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
 .gpu-status {
   display: flex;
   align-items: center;

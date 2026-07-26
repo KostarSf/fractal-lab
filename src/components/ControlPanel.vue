@@ -31,18 +31,6 @@ const maxRecursionDepth = computed(() =>
     ? activeFormula.value.geometricIfs.recommendedMaxDepth
     : 32,
 );
-const rendererLabel = computed(() => {
-  if (activeFormula.value.renderer === "root-basin") {
-    return "GPU root-basin renderer";
-  }
-  if (activeFormula.value.renderer === "point-attractor") {
-    return "Worker + GPU point renderer";
-  }
-  if (activeFormula.value.renderer === "geometric-ifs") {
-    return "GPU geometric IFS renderer";
-  }
-  return "GPU escape-time renderer";
-});
 const pickerOpen = ref(false);
 
 onMounted(() => {
@@ -319,7 +307,17 @@ function updateComplexParameter(key: string, component: 0 | 1, event: Event): vo
 
     <footer class="controls-footer">
       <span class="gpu-status"><i aria-hidden="true"></i> WebGL2</span>
-      <span>{{ rendererLabel }}</span>
+      <a
+        href="https://github.com/KostarSf/fractal-lab"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Открыть проект Fractal Lab на GitHub"
+      >
+        GitHub · KostarSf/fractal-lab
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m9 15 6-6m-4 0h4v4" />
+        </svg>
+      </a>
     </footer>
 
     <FormulaPickerDialog v-if="pickerOpen" @close="pickerOpen = false" />
