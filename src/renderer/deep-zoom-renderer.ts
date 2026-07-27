@@ -3,6 +3,7 @@ import { VERTEX_SHADER } from "../fractals/shader.ts";
 import type { ComplexValue, DeepZoomBackendId, FractalParameterValue } from "../fractals/types.ts";
 import { createWebGLProgram, getUniform, type RenderState } from "./fractal-renderer.ts";
 import { createDeepZoomFragmentShader, deepZoomTexelsPerIteration } from "./deep-zoom-shader.ts";
+import { FullscreenTriangle } from "./fullscreen-triangle.ts";
 
 export interface DeepZoomRenderState extends Omit<RenderState, "center"> {
   readonly backend: DeepZoomBackendId;
@@ -27,7 +28,7 @@ type UniformName = (typeof UNIFORM_NAMES)[number];
 export class DeepZoomRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGL2RenderingContext;
-  readonly #vertexArray: WebGLVertexArrayObject;
+  readonly #fullscreenTriangle: FullscreenTriangle;
   readonly #orbitTexture: WebGLTexture;
 
   #backend: DeepZoomBackendId | undefined;
@@ -49,15 +50,14 @@ export class DeepZoomRenderer {
       throw new Error("WebGL2 недоступен для deep zoom.");
     }
 
-    const vertexArray = gl.createVertexArray();
     const orbitTexture = gl.createTexture();
-    if (!vertexArray || !orbitTexture) {
+    if (!orbitTexture) {
       throw new Error("WebGL не смог создать ресурсы deep zoom.");
     }
 
     this.#canvas = canvas;
     this.#gl = gl;
-    this.#vertexArray = vertexArray;
+    this.#fullscreenTriangle = new FullscreenTriangle(gl);
     this.#orbitTexture = orbitTexture;
     this.#setBackend("mandelbrot-perturbation");
   }
@@ -125,7 +125,7 @@ export class DeepZoomRenderer {
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
     gl.useProgram(this.#program);
-    gl.bindVertexArray(this.#vertexArray);
+    this.#fullscreenTriangle.bind();
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.#orbitTexture);
 
@@ -146,7 +146,7 @@ export class DeepZoomRenderer {
 
   dispose(): void {
     this.#gl.deleteTexture(this.#orbitTexture);
-    this.#gl.deleteVertexArray(this.#vertexArray);
+    this.#fullscreenTriangle.dispose();
     if (this.#program) {
       this.#gl.deleteProgram(this.#program);
     }

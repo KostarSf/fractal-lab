@@ -11,6 +11,7 @@ import {
 } from "../geometric-ifs/rules.ts";
 import { VERTEX_SHADER } from "../fractals/shader.ts";
 import { createWebGLProgram, getUniform } from "./fractal-renderer.ts";
+import { FullscreenTriangle } from "./fullscreen-triangle.ts";
 import { GEOMETRIC_IFS_FRAGMENT_SHADER } from "./geometric-ifs-shader.ts";
 
 export interface GeometricIfsRenderState {
@@ -54,7 +55,7 @@ export class GeometricIfsRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGL2RenderingContext;
   readonly #program: WebGLProgram;
-  readonly #vertexArray: WebGLVertexArrayObject;
+  readonly #fullscreenTriangle: FullscreenTriangle;
   readonly #uniforms = new Map<UniformName, WebGLUniformLocation>();
 
   #formula: GeometricIfsFormula | undefined;
@@ -71,16 +72,10 @@ export class GeometricIfsRenderer {
     if (!gl) {
       throw new Error("WebGL2 недоступен для geometric IFS renderer.");
     }
-    const vertexArray = gl.createVertexArray();
-    if (!vertexArray) {
-      throw new Error("WebGL не смог создать vertex array для geometric IFS.");
-    }
-
     this.#canvas = canvas;
     this.#gl = gl;
     this.#program = createWebGLProgram(gl, VERTEX_SHADER, GEOMETRIC_IFS_FRAGMENT_SHADER);
-    this.#vertexArray = vertexArray;
-    gl.bindVertexArray(vertexArray);
+    this.#fullscreenTriangle = new FullscreenTriangle(gl);
 
     for (const name of UNIFORM_NAMES) {
       this.#uniforms.set(name, getUniform(gl, this.#program, name));
@@ -142,7 +137,7 @@ export class GeometricIfsRenderer {
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
     gl.useProgram(this.#program);
-    gl.bindVertexArray(this.#vertexArray);
+    this.#fullscreenTriangle.bind();
     gl.uniform2f(this.#uniforms.get("u_resolution")!, this.#canvas.width, this.#canvas.height);
     gl.uniform2f(this.#uniforms.get("u_center")!, state.center[0], state.center[1]);
     gl.uniform1f(this.#uniforms.get("u_scale")!, state.scale);
@@ -176,6 +171,6 @@ export class GeometricIfsRenderer {
 
   dispose(): void {
     this.#gl.deleteProgram(this.#program);
-    this.#gl.deleteVertexArray(this.#vertexArray);
+    this.#fullscreenTriangle.dispose();
   }
 }

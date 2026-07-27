@@ -2,9 +2,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { createBasinFragmentShader } from "../renderer/basin-shader.ts";
 import { GEOMETRIC_IFS_FRAGMENT_SHADER } from "../renderer/geometric-ifs-shader.ts";
 import { createDefaultParameters, FRACTAL_FORMULAS } from "./formulas.ts";
-import { createFragmentShader } from "./shader.ts";
+import { createFragmentShader, VERTEX_SHADER } from "./shader.ts";
 
 describe("fractal formula registry", () => {
+  it("binds the fullscreen triangle position to vertex attribute 0", () => {
+    expect(VERTEX_SHADER).toContain("layout(location = 0) in vec2 a_position;");
+    expect(VERTEX_SHADER).toContain("gl_Position = vec4(a_position, 0.0, 1.0);");
+    expect(VERTEX_SHADER).not.toContain("gl_VertexID");
+  });
+
   it("uses unique ids and uniform names", () => {
     const ids = FRACTAL_FORMULAS.map((formula) => formula.id);
     expect(new Set(ids).size).toBe(ids.length);

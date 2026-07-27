@@ -2,6 +2,7 @@ import { VERTEX_SHADER } from "../fractals/shader.ts";
 import type { FractalParameterValue, RootBasinFormula } from "../fractals/types.ts";
 import { createWebGLProgram, getUniform, type RenderState } from "./fractal-renderer.ts";
 import { createBasinFragmentShader } from "./basin-shader.ts";
+import { FullscreenTriangle } from "./fullscreen-triangle.ts";
 
 const REQUIRED_UNIFORMS = [
   "u_resolution",
@@ -19,7 +20,7 @@ type RequiredUniform = (typeof REQUIRED_UNIFORMS)[number];
 export class BasinRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGL2RenderingContext;
-  readonly #vertexArray: WebGLVertexArrayObject;
+  readonly #fullscreenTriangle: FullscreenTriangle;
 
   #formula: RootBasinFormula | undefined;
   #program: WebGLProgram | undefined;
@@ -31,14 +32,9 @@ export class BasinRenderer {
     if (!gl) {
       throw new Error("WebGL2 недоступен для root-basin renderer.");
     }
-    const vertexArray = gl.createVertexArray();
-    if (!vertexArray) {
-      throw new Error("WebGL не смог создать root-basin vertex array.");
-    }
-
     this.#canvas = canvas;
     this.#gl = gl;
-    this.#vertexArray = vertexArray;
+    this.#fullscreenTriangle = new FullscreenTriangle(gl);
   }
 
   setFormula(formula: RootBasinFormula): void {
@@ -84,7 +80,7 @@ export class BasinRenderer {
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
     gl.useProgram(this.#program);
-    gl.bindVertexArray(this.#vertexArray);
+    this.#fullscreenTriangle.bind();
     gl.uniform2f(this.#uniforms.get("u_resolution")!, this.#canvas.width, this.#canvas.height);
     gl.uniform2f(this.#uniforms.get("u_center")!, state.center[0], state.center[1]);
     gl.uniform1f(this.#uniforms.get("u_scale")!, state.scale);
@@ -102,7 +98,7 @@ export class BasinRenderer {
       this.#gl.deleteProgram(this.#program);
       this.#program = undefined;
     }
-    this.#gl.deleteVertexArray(this.#vertexArray);
+    this.#fullscreenTriangle.dispose();
   }
 
   #setParameters(parameters: Readonly<Record<string, FractalParameterValue>>): void {

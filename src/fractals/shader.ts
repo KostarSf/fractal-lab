@@ -7,14 +7,10 @@ const MAX_SHADER_ITERATIONS = MAX_ITERATIONS + ESCAPE_SMOOTHING_ITERATIONS;
 export const VERTEX_SHADER = `#version 300 es
 precision highp float;
 
-const vec2 POSITIONS[3] = vec2[3](
-  vec2(-1.0, -1.0),
-  vec2(3.0, -1.0),
-  vec2(-1.0, 3.0)
-);
+layout(location = 0) in vec2 a_position;
 
 void main() {
-  gl_Position = vec4(POSITIONS[gl_VertexID], 0.0, 1.0);
+  gl_Position = vec4(a_position, 0.0, 1.0);
 }
 `;
 

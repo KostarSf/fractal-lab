@@ -1,5 +1,6 @@
 import { createFragmentShader, VERTEX_SHADER } from "../fractals/shader.ts";
 import type { ComplexValue, EscapeTimeFormula, FractalParameterValue } from "../fractals/types.ts";
+import { FullscreenTriangle } from "./fullscreen-triangle.ts";
 
 export interface RenderState {
   readonly center: ComplexValue;
@@ -92,7 +93,7 @@ export function getUniform(
 export class FractalRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGL2RenderingContext;
-  readonly #vertexArray: WebGLVertexArrayObject;
+  readonly #fullscreenTriangle: FullscreenTriangle;
 
   #formula: EscapeTimeFormula | undefined;
   #program: WebGLProgram | undefined;
@@ -113,15 +114,9 @@ export class FractalRenderer {
       throw new Error("WebGL2 недоступен. Проверьте поддержку браузера и аппаратное ускорение.");
     }
 
-    const vertexArray = gl.createVertexArray();
-    if (!vertexArray) {
-      throw new Error("WebGL не смог создать vertex array.");
-    }
-
     this.#canvas = canvas;
     this.#gl = gl;
-    this.#vertexArray = vertexArray;
-    gl.bindVertexArray(vertexArray);
+    this.#fullscreenTriangle = new FullscreenTriangle(gl);
   }
 
   setFormula(formula: EscapeTimeFormula): void {
@@ -170,7 +165,7 @@ export class FractalRenderer {
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
     gl.useProgram(this.#program);
-    gl.bindVertexArray(this.#vertexArray);
+    this.#fullscreenTriangle.bind();
 
     gl.uniform2f(this.#uniforms.get("u_resolution")!, this.#canvas.width, this.#canvas.height);
     gl.uniform2f(this.#uniforms.get("u_center")!, state.center[0], state.center[1]);
@@ -204,6 +199,6 @@ export class FractalRenderer {
       this.#gl.deleteProgram(this.#program);
       this.#program = undefined;
     }
-    this.#gl.deleteVertexArray(this.#vertexArray);
+    this.#fullscreenTriangle.dispose();
   }
 }
