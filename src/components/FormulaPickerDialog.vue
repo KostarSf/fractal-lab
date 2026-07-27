@@ -561,6 +561,10 @@ function categoryLabel(formula: FractalFormula): string {
 }
 
 @media (max-width: 650px) {
+  .formula-search input {
+    font-size: 16px;
+  }
+
   .formula-picker {
     width: calc(100vw - 16px);
     height: calc(100dvh - 16px);

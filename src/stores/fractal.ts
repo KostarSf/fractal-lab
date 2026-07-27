@@ -18,6 +18,13 @@ import {
 } from "../math/high-precision.ts";
 
 const DEFAULT_FORMULA = FRACTAL_FORMULAS[0]!;
+const DEFAULT_PALETTE = 0;
+const DEFAULT_COLOR_DENSITY = 0.075;
+const DEFAULT_COLOR_OFFSET = 0;
+const DEFAULT_SMOOTH_COLORS = true;
+const DEFAULT_RECURSION_DEPTH_MODE: RecursionDepthMode = "auto";
+const DEFAULT_RECURSION_DEPTH = 8;
+const DEFAULT_GEOMETRIC_COLORING: GeometricColoring = "level";
 
 interface FractalState {
   activeFormulaId: string;
@@ -83,13 +90,13 @@ export const useFractalStore = defineStore("fractal", {
       exactCenter: [camera.center[0], camera.center[1]],
       exactScale: camera.scale,
       maxIterations: iterationsForFormula(DEFAULT_FORMULA),
-      palette: 0,
-      colorDensity: 0.075,
-      colorOffset: 0,
-      smoothColors: true,
-      recursionDepthMode: "auto",
-      recursionDepth: 8,
-      geometricColoring: "level",
+      palette: DEFAULT_PALETTE,
+      colorDensity: DEFAULT_COLOR_DENSITY,
+      colorOffset: DEFAULT_COLOR_OFFSET,
+      smoothColors: DEFAULT_SMOOTH_COLORS,
+      recursionDepthMode: DEFAULT_RECURSION_DEPTH_MODE,
+      recursionDepth: DEFAULT_RECURSION_DEPTH,
+      geometricColoring: DEFAULT_GEOMETRIC_COLORING,
       parameterValues: createDefaultParameters(DEFAULT_FORMULA),
     };
   },
@@ -115,7 +122,25 @@ export const useFractalStore = defineStore("fractal", {
 
     resetCamera(): void {
       applyCamera(this, cameraForFormula(this.activeFormulaId));
-      this.colorOffset = 0;
+    },
+
+    resetSettings(): void {
+      const formula = this.activeFormula;
+      this.maxIterations = iterationsForFormula(formula);
+      this.palette = DEFAULT_PALETTE;
+      this.colorDensity = DEFAULT_COLOR_DENSITY;
+      this.colorOffset = DEFAULT_COLOR_OFFSET;
+      this.smoothColors = DEFAULT_SMOOTH_COLORS;
+      this.recursionDepthMode = DEFAULT_RECURSION_DEPTH_MODE;
+      this.recursionDepth =
+        formula.renderer === "geometric-ifs"
+          ? formula.geometricIfs.defaultDepth
+          : DEFAULT_RECURSION_DEPTH;
+      this.geometricColoring =
+        formula.renderer === "geometric-ifs"
+          ? formula.geometricIfs.defaultColoring
+          : DEFAULT_GEOMETRIC_COLORING;
+      this.parameterValues = createDefaultParameters(formula);
     },
 
     panByPixels(deltaX: number, deltaY: number, viewportHeight: number): void {

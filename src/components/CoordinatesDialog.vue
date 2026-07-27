@@ -404,6 +404,10 @@ button:focus-visible {
 }
 
 @media (max-width: 560px) {
+  .coordinate-fields input {
+    font-size: 16px;
+  }
+
   .coordinates-header,
   .coordinate-actions {
     padding-right: 20px;

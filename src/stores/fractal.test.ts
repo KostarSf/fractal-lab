@@ -11,6 +11,59 @@ describe("fractal store", () => {
     expect(useFractalStore().smoothColors).toBe(true);
   });
 
+  it("resets settings without changing the current view", () => {
+    const store = useFractalStore();
+    store.selectFormula("julia");
+    store.setCamera([0.25, -0.5], 0.75);
+    const camera = {
+      center: [...store.exactCenter],
+      scale: store.exactScale,
+    };
+
+    store.maxIterations = 120;
+    store.palette = 3;
+    store.colorDensity = 0.2;
+    store.colorOffset = 0.6;
+    store.smoothColors = false;
+    store.setParameter("constant", [-0.4, 0.6]);
+
+    store.resetSettings();
+
+    expect(store.exactCenter).toEqual(camera.center);
+    expect(store.exactScale).toBe(camera.scale);
+    expect(store.maxIterations).toBe(360);
+    expect(store.palette).toBe(0);
+    expect(store.colorDensity).toBe(0.075);
+    expect(store.colorOffset).toBe(0);
+    expect(store.smoothColors).toBe(true);
+    expect(store.parameterValues.constant).toEqual([-0.745, 0.113]);
+
+    store.selectFormula("sierpinski-carpet");
+    store.recursionDepthMode = "manual";
+    store.recursionDepth = 3;
+    store.geometricColoring = "solid";
+
+    store.resetSettings();
+
+    expect(store.recursionDepthMode).toBe("auto");
+    expect(store.recursionDepth).toBe(7);
+    expect(store.geometricColoring).toBe("level");
+  });
+
+  it("resets the view without changing settings", () => {
+    const store = useFractalStore();
+    store.setCamera([0.25, -0.5], 0.75);
+    store.palette = 3;
+    store.colorOffset = 0.6;
+
+    store.resetCamera();
+
+    expect(store.exactCenter).toEqual(["-0.65", "0"]);
+    expect(store.exactScale).toBe("3.1");
+    expect(store.palette).toBe(3);
+    expect(store.colorOffset).toBe(0.6);
+  });
+
   it("switches formulas and restores their defaults", () => {
     const store = useFractalStore();
 
