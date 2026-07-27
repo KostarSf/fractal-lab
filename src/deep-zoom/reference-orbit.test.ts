@@ -14,6 +14,15 @@ function orbitPoint(
   ];
 }
 
+function minimumOrbitMagnitude(result: ReferenceOrbitResult): number {
+  let minimum = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < result.orbitLength; index += 1) {
+    const [real, imaginary] = orbitPoint(result, index);
+    minimum = Math.min(minimum, Math.hypot(real, imaginary));
+  }
+  return minimum;
+}
+
 describe("reference orbit", () => {
   it("calculates the known orbit for c = -1", () => {
     const result = calculateReferenceOrbit({
@@ -164,9 +173,32 @@ describe("reference orbit", () => {
     expect(orbitPoint(result, 2)[0]).toBeCloseTo(1.1544077134986226, 14);
   });
 
+  it("avoids a poorly conditioned Nova reference near the Newton pole", () => {
+    const request = {
+      requestId: 10,
+      backend: "nova-cubic-perturbation",
+      parameters: { relaxation: 1, escapeRadius: 32, tolerance: 1e-5 },
+      center: [
+        "-0.5635056508978129403584865883114601384960985093031720655813935",
+        "0.4604381744326210260055039469581156001484013367015524702673916",
+      ],
+      scale: "3.3643029627870459853825068528251640603590769100179956804543931e-21",
+      maxIterations: 500,
+      viewportAspect: 1.5,
+    } as const;
+    const centered = calculateReferenceOrbit(request);
+    const selected = calculateBestReferenceOrbit(request);
+
+    expect(centered.orbitLength).toBe(501);
+    expect(selected.orbitLength).toBe(501);
+    expect(selected.center).not.toEqual(request.center);
+    expect(minimumOrbitMagnitude(centered)).toBeLessThan(0.08);
+    expect(minimumOrbitMagnitude(selected)).toBeGreaterThan(0.25);
+  });
+
   it("skips a singular Newton center when selecting the viewport reference", () => {
     const result = calculateBestReferenceOrbit({
-      requestId: 10,
+      requestId: 11,
       backend: "newton-cubic-perturbation",
       parameters: { tolerance: 1e-5 },
       center: ["0", "0"],
@@ -181,7 +213,7 @@ describe("reference orbit", () => {
 
   it("keeps the reported deep Newton reference finite through the iteration budget", () => {
     const result = calculateReferenceOrbit({
-      requestId: 11,
+      requestId: 12,
       backend: "newton-cubic-perturbation",
       parameters: { tolerance: 1e-5 },
       center: ["1.261734435999730917660226160714876", "1.532704545089778066177656844939145"],

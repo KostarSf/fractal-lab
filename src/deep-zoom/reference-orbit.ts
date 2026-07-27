@@ -101,6 +101,56 @@ function referenceCandidates(
   return candidates;
 }
 
+interface ReferenceConditioning {
+  readonly maximumMagnitudeSquared: number;
+  readonly minimumMagnitudeSquared: number;
+}
+
+function referenceConditioning(result: ReferenceOrbitResult): ReferenceConditioning {
+  let maximumMagnitudeSquared = 0;
+  let minimumMagnitudeSquared = Number.POSITIVE_INFINITY;
+
+  for (let iteration = 0; iteration < result.orbitLength; iteration += 1) {
+    const offset = iteration * result.texelsPerIteration * 4;
+    const real = result.values[offset]! + result.values[offset + 2]!;
+    const imaginary = result.values[offset + 1]! + result.values[offset + 3]!;
+    const magnitudeSquared = real * real + imaginary * imaginary;
+    maximumMagnitudeSquared = Math.max(maximumMagnitudeSquared, magnitudeSquared);
+    minimumMagnitudeSquared = Math.min(minimumMagnitudeSquared, magnitudeSquared);
+  }
+
+  return {
+    maximumMagnitudeSquared,
+    minimumMagnitudeSquared,
+  };
+}
+
+function isBetterReference(
+  candidate: ReferenceOrbitResult,
+  current: ReferenceOrbitResult | undefined,
+  backend: ReferenceOrbitRequest["backend"],
+): boolean {
+  if (!current || candidate.orbitLength !== current.orbitLength) {
+    return !current || candidate.orbitLength > current.orbitLength;
+  }
+  if (backend !== "nova-cubic-perturbation") {
+    return false;
+  }
+
+  const candidateConditioning = referenceConditioning(candidate);
+  const currentConditioning = referenceConditioning(current);
+  if (
+    candidateConditioning.minimumMagnitudeSquared !== currentConditioning.minimumMagnitudeSquared
+  ) {
+    return (
+      candidateConditioning.minimumMagnitudeSquared > currentConditioning.minimumMagnitudeSquared
+    );
+  }
+  return (
+    candidateConditioning.maximumMagnitudeSquared < currentConditioning.maximumMagnitudeSquared
+  );
+}
+
 /**
  * A rapidly escaping reference orbit is both less stable and much shorter.
  * Sampling the visible area keeps perturbation quality tied to world
@@ -114,10 +164,13 @@ export function calculateBestReferenceOrbit(request: ReferenceOrbitRequest): Ref
   for (const center of referenceCandidates(request)) {
     const result = calculateReferenceOrbit({ ...request, center });
 
-    if (!bestResult || result.orbitLength > bestResult.orbitLength) {
+    if (isBetterReference(result, bestResult, request.backend)) {
       bestResult = result;
     }
-    if (result.orbitLength === maximumOrbitLength) {
+    if (
+      request.backend !== "nova-cubic-perturbation" &&
+      result.orbitLength === maximumOrbitLength
+    ) {
       return result;
     }
   }

@@ -23,6 +23,12 @@ interface WebGlProbe {
 
 const TRANSITION_BEFORE = "9999";
 const TRANSITION_AFTER = "10001";
+const NOVA_PRECISION_CENTER = [
+  "-0.5635056508978129403584865883114601384960985093031720655813935",
+  "0.4604381744326210260055039469581156001484013367015524702673916",
+] as const;
+const NOVA_PRECISION_MAGNIFICATION =
+  "1.070058208140000140438545312564820364016081573715070873742049e+21";
 
 const SCENARIOS: readonly DeepZoomScenario[] = [
   {
@@ -115,6 +121,51 @@ for (const scenario of SCENARIOS) {
     });
   });
 }
+
+test("Nova: the deep perturbation frame stays precise near a late pole encounter", async ({
+  page,
+}, testInfo) => {
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      runtimeErrors.push(message.text());
+    }
+  });
+
+  await page.goto("/");
+  const canvas = page.locator("#fractal-canvas");
+  await expect(canvas).toBeVisible();
+  await selectFormula(page, "Nova");
+  await page.locator("#iterations").evaluate((element) => {
+    const input = element as HTMLInputElement;
+    input.value = "500";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await setExactView(page, NOVA_PRECISION_CENTER, NOVA_PRECISION_MAGNIFICATION);
+  await waitForDeepZoom(page);
+  const sample = await captureCanvas(page, canvas, "nova-precision-deep.png");
+  expectUsefulFrame(sample);
+
+  const webgl = await probeWebGl(canvas);
+  expect(webgl.version).toContain("WebGL 2.0");
+  expect(webgl.contextLost).toBe(false);
+  expect(webgl.error).toBe(0);
+  await expect(page.locator(".render-error")).toHaveCount(0);
+  expect(runtimeErrors).toEqual([]);
+
+  await attachMetrics(testInfo, {
+    formula: "nova",
+    magnification: NOVA_PRECISION_MAGNIFICATION,
+    sample: {
+      centroid: sample.centroid,
+      gradientWeight: sample.gradientWeight,
+      uniqueColors: sample.uniqueColors,
+      variance: sample.variance,
+    },
+    webgl,
+  });
+});
 
 async function selectFormula(page: Page, label: string): Promise<void> {
   const shortcut = await page.evaluate(() =>

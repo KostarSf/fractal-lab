@@ -16,6 +16,9 @@ describe("deep zoom shader registry", () => {
         expect(shader).toContain("normalizeExtendedDelta(");
         expect(shader).toContain("calculateNextNewtonDelta(");
         expect(shader).not.toContain("referenceExhausted");
+      } else if (backend === "nova-cubic-perturbation") {
+        expect(shader).toContain("if (referenceExhausted || closerToCriticalPoint)");
+        expect(shader).toContain("maxNorm(materializePreciseComplex(nextDeltaCurrentPrecise))");
       } else {
         expect(shader).toContain("if (referenceExhausted || closerToCriticalPoint)");
         expect(shader).toContain("maxNorm(actualZ) < maxNorm(");
@@ -73,11 +76,12 @@ describe("deep zoom shader registry", () => {
 
     const nova = createDeepZoomFragmentShader("nova-cubic-perturbation");
     expect(nova).toContain("uniform float u_novaRelaxation;");
-    expect(nova).toContain("calculateCorrectionDelta(");
-    expect(nova).toContain("calculateReciprocalPerturbationTerm(");
-    expect(nova).not.toContain("denominatorSquared < 1e-38");
-    expect(nova).toContain("u_novaRelaxation * correctionDelta");
-    expect(nova).toContain("planeDelta;");
+    expect(nova).toContain("vec2 preciseScalarMultiply(");
+    expect(nova).toContain("bool calculatePreciseCorrectionDelta(");
+    expect(nova).toContain("preciseComplexScale(\n          correctionDeltaPrecise");
+    expect(nova).toContain("vec4 planeDeltaPrecise = preciseComplex(planeDelta);");
+    expect(nova).toContain("preciseComplexSubtract(\n        actualZPrecise");
+    expect(nova).not.toContain("vec2 deltaCurrent = vec2(0.0);");
     expect(nova).toContain("thresholdCrossingPhase(previousMetric, finalMetric");
   });
 });

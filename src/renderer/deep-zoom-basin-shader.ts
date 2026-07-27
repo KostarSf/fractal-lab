@@ -14,6 +14,207 @@ uniform float u_convergenceTolerance;
 `;
 }
 
+function novaPrecisionCode(backend: RootBasinDeepZoomBackendId): string {
+  if (backend !== "nova-cubic-perturbation") {
+    return "";
+  }
+
+  return `
+// Complex double-single values use the same layout as the reference texture:
+// high real/imaginary components in xy and their low residuals in zw.
+vec4 preciseComplex(vec2 value) {
+  return vec4(value, 0.0, 0.0);
+}
+
+vec2 preciseScalarAdd(vec2 left, vec2 right) {
+  float sum = left.x + right.x;
+  float virtualRight = sum - left.x;
+  float error =
+    (left.x - (sum - virtualRight)) +
+    (right.x - virtualRight) +
+    left.y +
+    right.y;
+  float high = sum + error;
+  return vec2(high, error - (high - sum));
+}
+
+vec2 preciseScalarMultiply(vec2 left, vec2 right) {
+  const float SPLITTER = 4097.0;
+  float product = left.x * right.x;
+
+  float leftSplit = SPLITTER * left.x;
+  float leftHigh = leftSplit - (leftSplit - left.x);
+  float leftLow = left.x - leftHigh;
+  float rightSplit = SPLITTER * right.x;
+  float rightHigh = rightSplit - (rightSplit - right.x);
+  float rightLow = right.x - rightHigh;
+
+  float error =
+    ((leftHigh * rightHigh - product) +
+      leftHigh * rightLow +
+      leftLow * rightHigh) +
+    leftLow * rightLow;
+  error += left.x * right.y + left.y * right.x + left.y * right.y;
+  float high = product + error;
+  return vec2(high, error - (high - product));
+}
+
+vec2 preciseScalarDivide(vec2 numerator, vec2 denominator) {
+  float estimate = numerator.x / denominator.x;
+  vec2 remainder = preciseScalarAdd(
+    numerator,
+    -preciseScalarMultiply(denominator, vec2(estimate, 0.0))
+  );
+  float refinement = (remainder.x + remainder.y) / denominator.x;
+  return preciseScalarAdd(
+    vec2(estimate, 0.0),
+    vec2(refinement, 0.0)
+  );
+}
+
+vec4 packPreciseComplex(vec2 realPart, vec2 imaginaryPart) {
+  return vec4(
+    realPart.x,
+    imaginaryPart.x,
+    realPart.y,
+    imaginaryPart.y
+  );
+}
+
+vec4 preciseComplexAdd(vec4 left, vec4 right) {
+  return packPreciseComplex(
+    preciseScalarAdd(left.xz, right.xz),
+    preciseScalarAdd(left.yw, right.yw)
+  );
+}
+
+vec4 preciseComplexSubtract(vec4 left, vec4 right) {
+  return preciseComplexAdd(left, -right);
+}
+
+vec4 preciseComplexMultiply(vec4 left, vec4 right) {
+  vec2 realPart = preciseScalarAdd(
+    preciseScalarMultiply(left.xz, right.xz),
+    -preciseScalarMultiply(left.yw, right.yw)
+  );
+  vec2 imaginaryPart = preciseScalarAdd(
+    preciseScalarMultiply(left.xz, right.yw),
+    preciseScalarMultiply(left.yw, right.xz)
+  );
+  return packPreciseComplex(realPart, imaginaryPart);
+}
+
+vec4 preciseComplexScale(vec4 value, float scalar) {
+  vec2 preciseScalar = vec2(scalar, 0.0);
+  return packPreciseComplex(
+    preciseScalarMultiply(value.xz, preciseScalar),
+    preciseScalarMultiply(value.yw, preciseScalar)
+  );
+}
+
+vec2 materializePreciseComplex(vec4 value) {
+  return value.xy + value.zw;
+}
+
+bool preciseComplexDivide(
+  vec4 numerator,
+  vec4 denominator,
+  out vec4 quotient
+) {
+  vec2 denominatorApproximation = materializePreciseComplex(denominator);
+  float denominatorScale = maxNorm(denominatorApproximation);
+  if (
+    denominatorScale == 0.0 ||
+    isnan(denominatorScale) ||
+    isinf(denominatorScale)
+  ) {
+    return false;
+  }
+
+  float inverseScale = 1.0 / denominatorScale;
+  vec4 normalizedNumerator = preciseComplexScale(
+    numerator,
+    inverseScale
+  );
+  vec4 normalizedDenominator = preciseComplexScale(
+    denominator,
+    inverseScale
+  );
+  vec2 denominatorSquared = preciseScalarAdd(
+    preciseScalarMultiply(
+      normalizedDenominator.xz,
+      normalizedDenominator.xz
+    ),
+    preciseScalarMultiply(
+      normalizedDenominator.yw,
+      normalizedDenominator.yw
+    )
+  );
+  if (denominatorSquared.x == 0.0) {
+    return false;
+  }
+
+  vec2 realNumerator = preciseScalarAdd(
+    preciseScalarMultiply(
+      normalizedNumerator.xz,
+      normalizedDenominator.xz
+    ),
+    preciseScalarMultiply(
+      normalizedNumerator.yw,
+      normalizedDenominator.yw
+    )
+  );
+  vec2 imaginaryNumerator = preciseScalarAdd(
+    preciseScalarMultiply(
+      normalizedNumerator.yw,
+      normalizedDenominator.xz
+    ),
+    -preciseScalarMultiply(
+      normalizedNumerator.xz,
+      normalizedDenominator.yw
+    )
+  );
+  quotient = packPreciseComplex(
+    preciseScalarDivide(realNumerator, denominatorSquared),
+    preciseScalarDivide(imaginaryNumerator, denominatorSquared)
+  );
+  vec2 approximation = materializePreciseComplex(quotient);
+  return !any(isnan(approximation)) && !any(isinf(approximation));
+}
+
+bool calculatePreciseCorrectionDelta(
+  vec4 reference,
+  vec4 delta,
+  out vec4 correctionDelta
+) {
+  vec4 actual = preciseComplexAdd(reference, delta);
+  vec4 numerator = preciseComplexAdd(
+    preciseComplexScale(reference, 2.0),
+    delta
+  );
+  vec4 denominator = preciseComplexMultiply(
+    preciseComplexMultiply(reference, reference),
+    preciseComplexMultiply(actual, actual)
+  );
+  vec4 reciprocalTerm;
+  if (!preciseComplexDivide(numerator, denominator, reciprocalTerm)) {
+    return false;
+  }
+
+  vec4 factor = preciseComplexScale(
+    preciseComplexAdd(
+      preciseComplex(vec2(1.0, 0.0)),
+      reciprocalTerm
+    ),
+    1.0 / 3.0
+  );
+  correctionDelta = preciseComplexMultiply(delta, factor);
+  vec2 approximation = materializePreciseComplex(correctionDelta);
+  return !any(isnan(approximation)) && !any(isinf(approximation));
+}
+`;
+}
+
 function iterationCode(backend: RootBasinDeepZoomBackendId): string {
   if (backend === "newton-cubic-perturbation") {
     return `
@@ -198,8 +399,13 @@ function iterationCode(backend: RootBasinDeepZoomBackendId): string {
   }
 
   return `
-  vec2 deltaCurrent = vec2(0.0);
-  vec2 actualZ = addReference(fetchReference(0), deltaCurrent);
+  vec4 planeDeltaPrecise = preciseComplex(planeDelta);
+  vec4 deltaCurrentPrecise = preciseComplex(vec2(0.0));
+  vec4 actualZPrecise = preciseComplexAdd(
+    fetchReference(0),
+    deltaCurrentPrecise
+  );
+  vec2 actualZ = materializePreciseComplex(actualZPrecise);
   int referenceIndex = 0;
   int resultKind = 0;
   int rootIndex = 0;
@@ -216,26 +422,52 @@ function iterationCode(backend: RootBasinDeepZoomBackendId): string {
     }
 
     vec4 referenceCurrent = fetchReference(referenceIndex);
-    vec2 actualCurrent = addReference(referenceCurrent, deltaCurrent);
-    vec2 correctionDelta;
-    if (!calculateCorrectionDelta(referenceCurrent, deltaCurrent, correctionDelta)) {
+    vec4 actualCurrentPrecise = preciseComplexAdd(
+      referenceCurrent,
+      deltaCurrentPrecise
+    );
+    vec4 correctionDeltaPrecise;
+    if (
+      !calculatePreciseCorrectionDelta(
+        referenceCurrent,
+        deltaCurrentPrecise,
+        correctionDeltaPrecise
+      )
+    ) {
       break;
     }
 
-    vec2 nextDeltaCurrent =
-      deltaCurrent -
-      u_novaRelaxation * correctionDelta +
-      planeDelta;
+    vec4 nextDeltaCurrentPrecise = preciseComplexAdd(
+      preciseComplexSubtract(
+        deltaCurrentPrecise,
+        preciseComplexScale(
+          correctionDeltaPrecise,
+          u_novaRelaxation
+        )
+      ),
+      planeDeltaPrecise
+    );
     int nextReferenceIndex = referenceIndex + 1;
     vec4 nextReferenceCurrent = fetchReference(nextReferenceIndex);
-    actualZ = addReference(nextReferenceCurrent, nextDeltaCurrent);
-    vec2 stepDelta = actualZ - actualCurrent;
+    actualZPrecise = preciseComplexAdd(
+      nextReferenceCurrent,
+      nextDeltaCurrentPrecise
+    );
+    actualZ = materializePreciseComplex(actualZPrecise);
+    vec2 stepDelta = materializePreciseComplex(
+      preciseComplexSubtract(
+        actualZPrecise,
+        actualCurrentPrecise
+      )
+    );
     iteration = i;
-    finalMetric = length(stepDelta);
+    finalMetric = stableComplexMagnitude(stepDelta);
 
     if (dot(actualZ, actualZ) > escapeRadiusSquared) {
-      previousMetric = length(actualCurrent);
-      finalMetric = length(actualZ);
+      previousMetric = stableComplexMagnitude(
+        materializePreciseComplex(actualCurrentPrecise)
+      );
+      finalMetric = stableComplexMagnitude(actualZ);
       smoothingThreshold = max(u_novaEscapeRadius, 1e-12);
       hasPreviousMetric = true;
       resultKind = 2;
@@ -250,12 +482,17 @@ function iterationCode(backend: RootBasinDeepZoomBackendId): string {
     previousMetric = finalMetric;
     hasPreviousMetric = true;
     bool referenceExhausted = nextReferenceIndex >= u_referenceCount - 1;
-    bool closerToCriticalPoint = maxNorm(actualZ) < maxNorm(nextDeltaCurrent);
+    bool closerToCriticalPoint =
+      maxNorm(actualZ) <
+      maxNorm(materializePreciseComplex(nextDeltaCurrentPrecise));
     if (referenceExhausted || closerToCriticalPoint) {
-      deltaCurrent = subtractReference(actualZ, fetchReference(0));
+      deltaCurrentPrecise = preciseComplexSubtract(
+        actualZPrecise,
+        fetchReference(0)
+      );
       referenceIndex = 0;
     } else {
-      deltaCurrent = nextDeltaCurrent;
+      deltaCurrentPrecise = nextDeltaCurrentPrecise;
       referenceIndex = nextReferenceIndex;
     }
   }
@@ -339,6 +576,8 @@ vec2 subtractReference(vec2 actual, vec4 reference) {
 float maxNorm(vec2 value) {
   return max(abs(value.x), abs(value.y));
 }
+
+${novaPrecisionCode(backend)}
 
 void normalizeExtendedDelta(
   inout vec2 mantissa,
