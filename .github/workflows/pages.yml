@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: vp test
 
+      - name: Browser regression
+        run: vp run browser:test
+
       - name: Set up GitHub Pages
         id: pages
         uses: actions/configure-pages@v6

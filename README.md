@@ -47,6 +47,9 @@ vp check
 # Тесты
 vp test
 
+# Браузерные regression-тесты в Chrome с реальным WebGL2
+vp run browser:test
+
 # Production-сборка в dist/
 vp run build
 
@@ -93,6 +96,8 @@ Deep zoom доступен для пяти escape-time-формул, Newton и N
 ограничено значением `1e35×`: координаты камеры и опорная орбита сохраняют
 произвольную точность, но отклонение пикселя в WebGL2 shader остаётся
 `highp float`.
+
+Браузерные regression-тесты используют установленный Google Chrome.
 
 ## Добавление фрактала
 
