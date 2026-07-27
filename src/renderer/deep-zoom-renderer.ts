@@ -36,9 +36,6 @@ export class DeepZoomRenderer {
   #uniforms = new Map<UniformName, WebGLUniformLocation>();
   #parameterUniforms = new Map<string, WebGLUniformLocation>();
   #referenceCount = 0;
-  #frameSync: WebGLSync | undefined;
-  #framePoll: number | undefined;
-  #frameAvailableCallback: (() => void) | undefined;
 
   constructor(canvas: HTMLCanvasElement) {
     const gl = canvas.getContext("webgl2", {
@@ -116,31 +113,13 @@ export class DeepZoomRenderer {
     return true;
   }
 
-  canRenderFrame(): boolean {
-    return this.#releaseCompletedFrame();
-  }
-
-  whenFrameAvailable(callback: () => void): void {
-    if (this.#releaseCompletedFrame()) {
-      callback();
-      return;
-    }
-
-    this.#frameAvailableCallback = callback;
-    this.#scheduleFramePoll();
-  }
-
-  render(state: DeepZoomRenderState): boolean {
+  render(state: DeepZoomRenderState): void {
     if (this.#referenceCount < 2) {
       throw new Error("Опорная орбита deep zoom ещё не подготовлена.");
     }
     if (state.backend !== this.#backend || !this.#program) {
       throw new Error("Deep-zoom renderer получил состояние другого backend'а.");
     }
-    if (!this.#releaseCompletedFrame()) {
-      return false;
-    }
-
     const gl = this.#gl;
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
@@ -162,24 +141,9 @@ export class DeepZoomRenderer {
     this.#setParameters(state.parameters);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-    if (sync) {
-      this.#frameSync = sync;
-      gl.flush();
-    }
-    return true;
   }
 
   dispose(): void {
-    if (this.#framePoll !== undefined) {
-      window.cancelAnimationFrame(this.#framePoll);
-    }
-    if (this.#frameSync) {
-      this.#gl.deleteSync(this.#frameSync);
-    }
-    this.#framePoll = undefined;
-    this.#frameSync = undefined;
-    this.#frameAvailableCallback = undefined;
     this.#gl.deleteTexture(this.#orbitTexture);
     this.#fullscreenTriangle.dispose();
     if (this.#program) {
@@ -249,42 +213,5 @@ export class DeepZoomRenderer {
         this.#gl.uniform1f(uniform, -0.5);
       }
     }
-  }
-
-  #releaseCompletedFrame(): boolean {
-    if (!this.#frameSync) {
-      return true;
-    }
-
-    const status = this.#gl.clientWaitSync(this.#frameSync, 0, 0);
-    if (
-      status !== this.#gl.ALREADY_SIGNALED &&
-      status !== this.#gl.CONDITION_SATISFIED &&
-      status !== this.#gl.WAIT_FAILED
-    ) {
-      return false;
-    }
-
-    this.#gl.deleteSync(this.#frameSync);
-    this.#frameSync = undefined;
-    return true;
-  }
-
-  #scheduleFramePoll(): void {
-    if (this.#framePoll !== undefined) {
-      return;
-    }
-
-    this.#framePoll = window.requestAnimationFrame(() => {
-      this.#framePoll = undefined;
-      if (!this.#releaseCompletedFrame()) {
-        this.#scheduleFramePoll();
-        return;
-      }
-
-      const callback = this.#frameAvailableCallback;
-      this.#frameAvailableCallback = undefined;
-      callback?.();
-    });
   }
 }

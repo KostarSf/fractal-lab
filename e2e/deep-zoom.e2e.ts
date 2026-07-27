@@ -27,6 +27,7 @@ interface DeepZoomPerformanceProbe {
     readonly disjoint?: boolean;
     readonly gpuMs?: number;
     readonly height: number;
+    readonly colorDensity?: number;
     readonly maxIterations?: number;
     readonly timerAvailable: boolean;
     readonly width: number;
@@ -82,6 +83,78 @@ const SCENARIOS: readonly DeepZoomScenario[] = [
     center: ["-0.4740386578445767", "-1.0630872483221476"],
   },
 ];
+
+test("rendering keeps the controls responsive and coalesces stale ordinary frames", async ({
+  page,
+}) => {
+  await installPerformanceProbe(page, 260);
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      runtimeErrors.push(message.text());
+    }
+  });
+
+  await page.goto("/");
+  const canvas = page.locator("#fractal-canvas");
+  await expect(canvas).toBeVisible();
+  await waitForCanvasFrame(page, canvas);
+  await page.waitForTimeout(300);
+  await resetPerformanceProbe(page);
+
+  await page.getByLabel("Палитра").selectOption("1");
+  await expect.poll(async () => (await readPerformanceProbe(page)).draws.length).toBeGreaterThan(0);
+
+  const uiUpdates = await page.locator("#color-density").evaluate(async (element) => {
+    const input = element as HTMLInputElement;
+    const output = document.querySelector<HTMLOutputElement>('output[for="color-density"]');
+    const values = ["0.080", "0.090", "0.105", "0.120", "0.135", "0.150"];
+    const startedAt = window.performance.now();
+    const renderedValues: string[] = [];
+
+    for (const value of values) {
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+      renderedValues.push(output?.textContent?.trim() ?? "");
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+
+    return {
+      elapsedMs: window.performance.now() - startedAt,
+      renderedValues,
+      values,
+    };
+  });
+
+  expect(uiUpdates.renderedValues).toEqual(uiUpdates.values);
+  expect(uiUpdates.elapsedMs, "control updates waited for the artificial GPU fence").toBeLessThan(
+    250,
+  );
+
+  await expect
+    .poll(async () => {
+      const draws = (await readPerformanceProbe(page)).draws;
+      return draws.at(-1)?.colorDensity;
+    })
+    .toBeCloseTo(0.15);
+  await page.waitForTimeout(600);
+
+  const performance = await readPerformanceProbe(page);
+  expect(
+    performance.draws.length,
+    "stale ordinary frames accumulated in the GPU queue",
+  ).toBeLessThan(4);
+  expect(performance.draws.at(-1)?.colorDensity).toBeCloseTo(0.15);
+  expect(performance.draws.slice(1).every((draw) => draw.colorDensity === 0.15)).toBe(true);
+
+  const webgl = await probeWebGl(canvas);
+  expect(webgl.contextLost).toBe(false);
+  expect(webgl.error).toBe(0);
+  await expect(page.locator(".render-error")).toHaveCount(0);
+  expect(runtimeErrors).toEqual([]);
+});
 
 for (const scenario of SCENARIOS) {
   test(`${scenario.label}: deep-zoom transition and pan stay stable in WebGL2`, async ({
@@ -575,8 +648,8 @@ async function probeWebGl(canvas: Locator): Promise<WebGlProbe> {
   });
 }
 
-async function installPerformanceProbe(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function installPerformanceProbe(page: Page, artificialFenceDelayMs = 0): Promise<void> {
+  await page.addInitScript((fenceDelayMs) => {
     interface TimerQueryExtension {
       readonly GPU_DISJOINT_EXT: number;
       readonly TIME_ELAPSED_EXT: number;
@@ -588,6 +661,7 @@ async function installPerformanceProbe(page: Page): Promise<void> {
         disjoint?: boolean;
         gpuMs?: number;
         height: number;
+        colorDensity?: number;
         maxIterations?: number;
         timerAvailable: boolean;
         width: number;
@@ -670,8 +744,22 @@ async function installPerformanceProbe(page: Page): Promise<void> {
       WebGL2RenderingContext.prototype,
       "uniform1i",
     ) as WebGL2RenderingContext["uniform1i"];
+    const nativeUniform1f = Reflect.get(
+      WebGL2RenderingContext.prototype,
+      "uniform1f",
+    ) as WebGL2RenderingContext["uniform1f"];
+    const nativeFenceSync = Reflect.get(
+      WebGL2RenderingContext.prototype,
+      "fenceSync",
+    ) as WebGL2RenderingContext["fenceSync"];
+    const nativeClientWaitSync = Reflect.get(
+      WebGL2RenderingContext.prototype,
+      "clientWaitSync",
+    ) as WebGL2RenderingContext["clientWaitSync"];
     const uniformNames = new WeakMap<WebGLUniformLocation, string>();
     const maximumIterations = new WeakMap<WebGL2RenderingContext, number>();
+    const colorDensities = new WeakMap<WebGL2RenderingContext, number>();
+    const artificialSyncAvailability = new WeakMap<WebGLSync, number>();
     WebGL2RenderingContext.prototype.getUniformLocation = function measuredGetUniformLocation(
       program: WebGLProgram,
       name: string,
@@ -691,6 +779,36 @@ async function installPerformanceProbe(page: Page): Promise<void> {
       }
       Reflect.apply(nativeUniform1i, this, [location, value]);
     };
+    WebGL2RenderingContext.prototype.uniform1f = function measuredUniform1f(
+      location: WebGLUniformLocation | null,
+      value: GLfloat,
+    ): void {
+      if (location && uniformNames.get(location) === "u_colorDensity") {
+        colorDensities.set(this, value);
+      }
+      Reflect.apply(nativeUniform1f, this, [location, value]);
+    };
+    WebGL2RenderingContext.prototype.fenceSync = function measuredFenceSync(
+      condition: GLenum,
+      flags: GLbitfield,
+    ): WebGLSync | null {
+      const sync = Reflect.apply(nativeFenceSync, this, [condition, flags]);
+      if (sync && fenceDelayMs > 0 && (this.canvas as HTMLCanvasElement).id === "fractal-canvas") {
+        artificialSyncAvailability.set(sync, performance.now() + fenceDelayMs);
+      }
+      return sync;
+    };
+    WebGL2RenderingContext.prototype.clientWaitSync = function measuredClientWaitSync(
+      sync: WebGLSync,
+      flags: GLbitfield,
+      timeout: GLuint64,
+    ): GLenum {
+      const availableAt = artificialSyncAvailability.get(sync);
+      if (availableAt !== undefined && performance.now() < availableAt) {
+        return this.TIMEOUT_EXPIRED;
+      }
+      return Reflect.apply(nativeClientWaitSync, this, [sync, flags, timeout]);
+    };
     const timerExtensions = new WeakMap<WebGL2RenderingContext, TimerQueryExtension | null>();
     WebGL2RenderingContext.prototype.drawArrays = function measuredDrawArrays(
       mode: GLenum,
@@ -707,6 +825,7 @@ async function installPerformanceProbe(page: Page): Promise<void> {
       const query = extension ? this.createQuery() : null;
       const draw = {
         at: performance.now(),
+        colorDensity: colorDensities.get(this),
         height: this.drawingBufferHeight,
         maxIterations: maximumIterations.get(this),
         timerAvailable: extension !== null && query !== null,
@@ -716,6 +835,7 @@ async function installPerformanceProbe(page: Page): Promise<void> {
         disjoint?: boolean;
         gpuMs?: number;
         height: number;
+        colorDensity?: number;
         maxIterations?: number;
         timerAvailable: boolean;
         width: number;
@@ -761,7 +881,7 @@ async function installPerformanceProbe(page: Page): Promise<void> {
       }
       gl.deleteQuery(query);
     }
-  });
+  }, artificialFenceDelayMs);
 }
 
 async function readPerformanceProbe(page: Page): Promise<DeepZoomPerformanceProbe> {
@@ -806,8 +926,11 @@ async function collectFullFrameSamples(page: Page): Promise<DeepZoomPerformanceP
     const previousDrawCount = (await readPerformanceProbe(page)).draws.length;
     await palette.selectOption(value);
     await expect
-      .poll(async () => (await readPerformanceProbe(page)).draws.length)
-      .toBeGreaterThan(previousDrawCount);
+      .poll(async () => {
+        const draws = (await readPerformanceProbe(page)).draws.slice(previousDrawCount);
+        return draws.some((draw) => draw.width >= 900);
+      })
+      .toBe(true);
     await waitForPerformanceTimers(page);
   }
   return readPerformanceProbe(page);
@@ -820,7 +943,8 @@ function reportPerformance(
   interaction: DeepZoomPerformanceProbe | undefined,
   webgl: WebGlProbe,
 ): void {
-  const fullGpuSamples = fullFrames.draws
+  const fullFrameDraws = fullFrames.draws.filter((draw) => draw.width >= 900);
+  const fullGpuSamples = fullFrameDraws
     .map((draw) => draw.gpuMs)
     .filter((value): value is number => value !== undefined)
     .sort((left, right) => left - right);
@@ -835,10 +959,10 @@ function reportPerformance(
       renderer: webgl.renderer,
       reference: preparation.referenceResults.at(-1),
       full: {
-        drawingBuffers: fullFrames.draws.map((draw) => [draw.width, draw.height]),
-        drawCount: fullFrames.draws.length,
-        gpuDisjoint: fullFrames.draws.some((draw) => draw.disjoint),
-        iterations: fullFrames.draws.map((draw) => draw.maxIterations),
+        drawingBuffers: fullFrameDraws.map((draw) => [draw.width, draw.height]),
+        drawCount: fullFrameDraws.length,
+        gpuDisjoint: fullFrameDraws.some((draw) => draw.disjoint),
+        iterations: fullFrameDraws.map((draw) => draw.maxIterations),
         medianGpuMs:
           fullGpuSamples.length === 0
             ? undefined

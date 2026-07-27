@@ -23,6 +23,7 @@ import { CliffordRenderer } from "../renderer/clifford-renderer.ts";
 import { DeepZoomRenderer } from "../renderer/deep-zoom-renderer.ts";
 import { FractalRenderer } from "../renderer/fractal-renderer.ts";
 import { GeometricIfsRenderer } from "../renderer/geometric-ifs-renderer.ts";
+import { GpuFrameGate } from "../renderer/gpu-frame-gate.ts";
 import { useFractalStore } from "../stores/fractal.ts";
 
 const store = useFractalStore();
@@ -85,15 +86,21 @@ let basinRenderer: BasinRenderer | undefined;
 let cliffordRenderer: CliffordRenderer | undefined;
 let geometricIfsRenderer: GeometricIfsRenderer | undefined;
 let deepRenderer: DeepZoomRenderer | undefined;
+let renderGate: GpuFrameGate | undefined;
 let referenceOrbit: ReferenceOrbitResult | undefined;
+let uploadedReferenceOrbit: ReferenceOrbitResult | undefined;
 let referenceOrbitSignature = "";
 let referenceViewport: ReferenceViewport | undefined;
 let pendingReferenceViewport: ReferenceViewport | undefined;
 let attractorPoints: Float32Array | undefined;
+let uploadedAttractorPoints: Float32Array | undefined;
+let configuredFormulaId: string | undefined;
 const referenceOrbitClient = new ReferenceOrbitClient();
 const cliffordTrajectoryClient = new CliffordTrajectoryClient();
 let resizeObserver: ResizeObserver | undefined;
 let renderFrame: number | undefined;
+let renderRequested = false;
+let waitingForGpuFrame = false;
 let interactionTimer: number | undefined;
 let referenceTimer: number | undefined;
 let attractorTimer: number | undefined;
@@ -119,7 +126,7 @@ watch(
     }
 
     try {
-      configureActiveRenderer();
+      configuredFormulaId = undefined;
       errorMessage.value = "";
       scheduleRender();
     } catch (error) {
@@ -186,14 +193,16 @@ function initializeRenderer(): void {
   try {
     disposeRenderers();
     referenceOrbit = undefined;
+    uploadedReferenceOrbit = undefined;
     referenceOrbitSignature = "";
     referenceViewport = undefined;
     pendingReferenceViewport = undefined;
+    uploadedAttractorPoints = undefined;
+    configuredFormulaId = undefined;
     escapeRenderer = new FractalRenderer(canvas.value);
     basinRenderer = new BasinRenderer(canvas.value);
     cliffordRenderer = new CliffordRenderer(canvas.value);
     geometricIfsRenderer = new GeometricIfsRenderer(canvas.value);
-    configureActiveRenderer();
     try {
       deepRenderer = new DeepZoomRenderer(canvas.value);
       deepZoomError.value = "";
@@ -202,6 +211,11 @@ function initializeRenderer(): void {
       deepZoomStatus.value = "error";
       deepZoomError.value = error instanceof Error ? error.message : String(error);
     }
+    const gl = canvas.value.getContext("webgl2");
+    if (!gl) {
+      throw new Error("WebGL2 недоступен для планировщика кадров.");
+    }
+    renderGate = new GpuFrameGate(gl);
     errorMessage.value = "";
     scheduleReferenceOrbit();
     scheduleCliffordTrajectory();
@@ -214,15 +228,22 @@ function initializeRenderer(): void {
 
 function handleContextLost(event: Event): void {
   event.preventDefault();
+  renderGate?.dispose();
   escapeRenderer = undefined;
   basinRenderer = undefined;
   cliffordRenderer = undefined;
   geometricIfsRenderer = undefined;
   deepRenderer = undefined;
+  renderGate = undefined;
+  renderRequested = false;
+  waitingForGpuFrame = false;
   referenceOrbit = undefined;
+  uploadedReferenceOrbit = undefined;
   referenceViewport = undefined;
   pendingReferenceViewport = undefined;
   attractorPoints = undefined;
+  uploadedAttractorPoints = undefined;
+  configuredFormulaId = undefined;
   referenceOrbitClient.cancel();
   cliffordTrajectoryClient.cancel();
   errorMessage.value = "Контекст WebGL потерян. Ожидаем восстановления GPU.";
@@ -230,6 +251,10 @@ function handleContextLost(event: Event): void {
 
 function configureActiveRenderer(): void {
   const formula = store.activeFormula;
+  if (configuredFormulaId === formula.id) {
+    return;
+  }
+
   if (formula.renderer === "escape-time") {
     escapeRenderer?.setFormula(formula);
   } else if (formula.renderer === "root-basin") {
@@ -237,9 +262,11 @@ function configureActiveRenderer(): void {
   } else if (formula.renderer === "geometric-ifs") {
     geometricIfsRenderer?.setFormula(formula);
   }
+  configuredFormulaId = formula.id;
 }
 
 function disposeRenderers(): void {
+  renderGate?.dispose();
   escapeRenderer?.dispose();
   basinRenderer?.dispose();
   cliffordRenderer?.dispose();
@@ -250,6 +277,12 @@ function disposeRenderers(): void {
   cliffordRenderer = undefined;
   geometricIfsRenderer = undefined;
   deepRenderer = undefined;
+  renderGate = undefined;
+  renderRequested = false;
+  waitingForGpuFrame = false;
+  uploadedReferenceOrbit = undefined;
+  uploadedAttractorPoints = undefined;
+  configuredFormulaId = undefined;
 }
 
 async function exportPng(): Promise<void> {
@@ -541,20 +574,39 @@ function finishInteraction(): void {
 }
 
 function scheduleRender(): void {
-  if (renderFrame !== undefined) {
+  renderRequested = true;
+  if (renderFrame !== undefined || waitingForGpuFrame) {
     return;
   }
 
   renderFrame = window.requestAnimationFrame(() => {
     renderFrame = undefined;
     if (!canvas.value || canvas.value.clientWidth === 0 || canvas.value.clientHeight === 0) {
+      renderRequested = false;
+      return;
+    }
+    if (!renderGate) {
+      renderRequested = false;
+      return;
+    }
+    if (!renderGate.canSubmitFrame()) {
+      waitingForGpuFrame = true;
+      renderGate.whenFrameAvailable(() => {
+        waitingForGpuFrame = false;
+        if (renderRequested) {
+          scheduleRender();
+        }
+      });
       return;
     }
 
     try {
+      renderRequested = false;
       const formula = store.activeFormula;
       const backend = deepZoomBackend.value;
       const parameterSignature = deepZoomParameterSignature(backend, store.parameterValues);
+      let submittedFrame = false;
+      configureActiveRenderer();
       if (
         deepZoomMode.value &&
         backend &&
@@ -562,15 +614,15 @@ function scheduleRender(): void {
         referenceOrbit?.backend === backend &&
         referenceOrbitSignature === parameterSignature
       ) {
-        if (!deepRenderer.canRenderFrame()) {
-          deepRenderer.whenFrameAvailable(scheduleRender);
-          return;
+        if (uploadedReferenceOrbit !== referenceOrbit) {
+          deepRenderer.setReferenceOrbit(referenceOrbit);
+          uploadedReferenceOrbit = referenceOrbit;
         }
 
         const isRootBasin = isRootBasinDeepZoomBackend(backend);
         const renderQuality = quality < 1 && isRootBasin ? DEEP_ZOOM_PREVIEW_QUALITY : quality;
         deepRenderer.resize(renderQuality);
-        const rendered = deepRenderer.render({
+        deepRenderer.render({
           backend,
           centerDelta: [
             decimalDifferenceToNumber(
@@ -592,9 +644,7 @@ function scheduleRender(): void {
           smoothColors: store.smoothColors,
           parameters: store.parameterValues,
         });
-        if (!rendered) {
-          deepRenderer.whenFrameAvailable(scheduleRender);
-        }
+        submittedFrame = true;
       } else if (formula.renderer === "escape-time" && escapeRenderer) {
         escapeRenderer.resize(quality);
         escapeRenderer.render({
@@ -607,6 +657,7 @@ function scheduleRender(): void {
           smoothColors: store.smoothColors,
           parameters: store.parameterValues,
         });
+        submittedFrame = true;
       } else if (formula.renderer === "root-basin" && basinRenderer) {
         basinRenderer.resize(quality);
         basinRenderer.render({
@@ -619,7 +670,12 @@ function scheduleRender(): void {
           smoothColors: store.smoothColors,
           parameters: store.parameterValues,
         });
+        submittedFrame = true;
       } else if (formula.renderer === "point-attractor" && cliffordRenderer) {
+        if (attractorPoints && uploadedAttractorPoints !== attractorPoints) {
+          cliffordRenderer.setPoints(attractorPoints);
+          uploadedAttractorPoints = attractorPoints;
+        }
         cliffordRenderer.resize(quality);
         cliffordRenderer.render({
           center: store.center,
@@ -630,6 +686,7 @@ function scheduleRender(): void {
           pointSize: numberParameter("pointSize", 1.25),
           pointFraction: quality * quality,
         });
+        submittedFrame = true;
       } else if (formula.renderer === "geometric-ifs" && geometricIfsRenderer) {
         geometricIfsRenderer.resize(quality);
         geometricIfsRenderer.render({
@@ -641,8 +698,14 @@ function scheduleRender(): void {
           palette: store.palette,
           colorOffset: store.colorOffset,
         });
+        submittedFrame = true;
+      }
+
+      if (submittedFrame) {
+        renderGate.markFrameSubmitted();
       }
     } catch (error) {
+      renderRequested = false;
       showError(error);
     }
   });
@@ -735,7 +798,6 @@ async function prepareReferenceOrbit(viewport: ReferenceViewport): Promise<void>
     }
 
     const hadReference = referenceOrbit !== undefined;
-    deepRenderer?.setReferenceOrbit(result);
     referenceOrbit = result;
     referenceOrbitSignature = viewport.parameterSignature;
     referenceViewport = viewport;
@@ -859,6 +921,7 @@ function scheduleCliffordTrajectory(): void {
   if (!attractorMode.value) {
     cliffordRenderer?.clearPoints();
     attractorPoints = undefined;
+    uploadedAttractorPoints = undefined;
     attractorStatus.value = "idle";
     attractorPointCount.value = 0;
     return;
@@ -894,7 +957,6 @@ async function prepareCliffordTrajectory(): Promise<void> {
       return;
     }
 
-    cliffordRenderer?.setPoints(result.values);
     attractorPoints = result.values;
     attractorPointCount.value = result.pointCount;
     attractorStatus.value = "ready";
