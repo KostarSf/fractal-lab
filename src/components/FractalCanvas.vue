@@ -8,6 +8,12 @@ import {
   ReferenceOrbitCancelledError,
   ReferenceOrbitClient,
 } from "../deep-zoom/reference-orbit-client.ts";
+import {
+  canAcceptCalculatedReferenceOrbit,
+  canReuseReferenceOrbit,
+  canReuseReferenceRequest,
+  type ReferenceViewport,
+} from "../deep-zoom/reference-reuse.ts";
 import { hasDeepZoomBackend } from "../deep-zoom/registry.ts";
 import type { ReferenceOrbitResult } from "../deep-zoom/types.ts";
 import type { ComplexValue, DeepZoomBackendId, FractalParameterValue } from "../fractals/types.ts";
@@ -81,6 +87,8 @@ let geometricIfsRenderer: GeometricIfsRenderer | undefined;
 let deepRenderer: DeepZoomRenderer | undefined;
 let referenceOrbit: ReferenceOrbitResult | undefined;
 let referenceOrbitSignature = "";
+let referenceViewport: ReferenceViewport | undefined;
+let pendingReferenceViewport: ReferenceViewport | undefined;
 let attractorPoints: Float32Array | undefined;
 const referenceOrbitClient = new ReferenceOrbitClient();
 const cliffordTrajectoryClient = new CliffordTrajectoryClient();
@@ -90,6 +98,12 @@ let interactionTimer: number | undefined;
 let referenceTimer: number | undefined;
 let attractorTimer: number | undefined;
 let quality = 1;
+let fullRenderDeferred = false;
+
+const DEEP_ZOOM_PREVIEW_QUALITY = 0.48;
+const DEFAULT_REFINEMENT_DELAY_MS = 140;
+const ROOT_BASIN_DEEP_ZOOM_REFINEMENT_DELAY_MS = 280;
+const REFERENCE_DEBOUNCE_MS = 180;
 
 const activePointers = new Map<number, readonly [x: number, y: number]>();
 
@@ -173,6 +187,8 @@ function initializeRenderer(): void {
     disposeRenderers();
     referenceOrbit = undefined;
     referenceOrbitSignature = "";
+    referenceViewport = undefined;
+    pendingReferenceViewport = undefined;
     escapeRenderer = new FractalRenderer(canvas.value);
     basinRenderer = new BasinRenderer(canvas.value);
     cliffordRenderer = new CliffordRenderer(canvas.value);
@@ -204,6 +220,8 @@ function handleContextLost(event: Event): void {
   geometricIfsRenderer = undefined;
   deepRenderer = undefined;
   referenceOrbit = undefined;
+  referenceViewport = undefined;
+  pendingReferenceViewport = undefined;
   attractorPoints = undefined;
   referenceOrbitClient.cancel();
   cliffordTrajectoryClient.cancel();
@@ -449,8 +467,7 @@ function handlePointerEnd(event: PointerEvent): void {
 
   canvas.value?.classList.toggle("is-dragging", activePointers.size > 0);
   if (activePointers.size === 0) {
-    quality = 1;
-    scheduleRender();
+    finishInteraction();
   }
 }
 
@@ -496,16 +513,31 @@ function handleKeydown(event: KeyboardEvent): void {
 
 function beginBriefInteraction(): void {
   quality = 0.68;
+  fullRenderDeferred = false;
   scheduleRender();
+  const refinementDelay =
+    deepZoomMode.value && isRootBasinDeepZoomBackend(deepZoomBackend.value)
+      ? ROOT_BASIN_DEEP_ZOOM_REFINEMENT_DELAY_MS
+      : DEFAULT_REFINEMENT_DELAY_MS;
 
   if (interactionTimer !== undefined) {
     window.clearTimeout(interactionTimer);
   }
   interactionTimer = window.setTimeout(() => {
-    quality = 1;
     interactionTimer = undefined;
-    scheduleRender();
-  }, 140);
+    finishInteraction();
+  }, refinementDelay);
+}
+
+function finishInteraction(): void {
+  if (hasPendingReferenceReplacement()) {
+    fullRenderDeferred = true;
+    return;
+  }
+
+  quality = 1;
+  fullRenderDeferred = false;
+  scheduleRender();
 }
 
 function scheduleRender(): void {
@@ -530,8 +562,15 @@ function scheduleRender(): void {
         referenceOrbit?.backend === backend &&
         referenceOrbitSignature === parameterSignature
       ) {
-        deepRenderer.resize(quality);
-        deepRenderer.render({
+        if (!deepRenderer.canRenderFrame()) {
+          deepRenderer.whenFrameAvailable(scheduleRender);
+          return;
+        }
+
+        const isRootBasin = isRootBasinDeepZoomBackend(backend);
+        const renderQuality = quality < 1 && isRootBasin ? DEEP_ZOOM_PREVIEW_QUALITY : quality;
+        deepRenderer.resize(renderQuality);
+        const rendered = deepRenderer.render({
           backend,
           centerDelta: [
             decimalDifferenceToNumber(
@@ -553,6 +592,9 @@ function scheduleRender(): void {
           smoothColors: store.smoothColors,
           parameters: store.parameterValues,
         });
+        if (!rendered) {
+          deepRenderer.whenFrameAvailable(scheduleRender);
+        }
       } else if (formula.renderer === "escape-time" && escapeRenderer) {
         escapeRenderer.resize(quality);
         escapeRenderer.render({
@@ -607,15 +649,17 @@ function scheduleRender(): void {
 }
 
 function scheduleReferenceOrbit(): void {
-  referenceOrbitClient.cancel();
-  if (referenceTimer !== undefined) {
-    window.clearTimeout(referenceTimer);
-    referenceTimer = undefined;
-  }
-
-  if (!deepZoomMode.value) {
+  const targetViewport = currentReferenceViewport();
+  if (!targetViewport) {
+    referenceOrbitClient.cancel();
+    pendingReferenceViewport = undefined;
+    if (referenceTimer !== undefined) {
+      window.clearTimeout(referenceTimer);
+      referenceTimer = undefined;
+    }
     referenceOrbit = undefined;
     referenceOrbitSignature = "";
+    referenceViewport = undefined;
     deepZoomStatus.value = "idle";
     deepZoomPrecision.value = 0;
     return;
@@ -626,65 +670,130 @@ function scheduleReferenceOrbit(): void {
     return;
   }
 
-  deepZoomStatus.value = "preparing";
-  deepZoomError.value = "";
-  referenceTimer = window.setTimeout(() => {
-    referenceTimer = undefined;
-    void prepareReferenceOrbit();
-  }, 120);
-}
-
-async function prepareReferenceOrbit(): Promise<void> {
-  const backend = deepZoomBackend.value;
-  if (!backend) {
+  if (
+    referenceOrbit &&
+    referenceViewport &&
+    canReuseReferenceOrbit(referenceOrbit, referenceViewport, targetViewport)
+  ) {
+    if (referenceTimer !== undefined) {
+      window.clearTimeout(referenceTimer);
+      referenceTimer = undefined;
+    }
+    if (pendingReferenceViewport) {
+      pendingReferenceViewport = undefined;
+      referenceOrbitClient.cancel();
+    }
+    deepZoomStatus.value = "ready";
+    finishDeferredFullRender();
     return;
   }
 
-  const center = [store.exactCenter[0], store.exactCenter[1]] as const;
-  const scale = store.exactScale;
-  const maxIterations = store.maxIterations;
+  deepZoomStatus.value = "preparing";
+  deepZoomError.value = "";
+  if (
+    pendingReferenceViewport &&
+    canReuseReferenceRequest(pendingReferenceViewport, targetViewport)
+  ) {
+    return;
+  }
+
+  if (pendingReferenceViewport) {
+    pendingReferenceViewport = undefined;
+    referenceOrbitClient.cancel();
+  }
+  if (referenceTimer !== undefined) {
+    window.clearTimeout(referenceTimer);
+  }
+  referenceTimer = window.setTimeout(() => {
+    referenceTimer = undefined;
+    void prepareReferenceOrbit(targetViewport);
+  }, REFERENCE_DEBOUNCE_MS);
+}
+
+async function prepareReferenceOrbit(viewport: ReferenceViewport): Promise<void> {
+  const backend = viewport.backend;
   const parameters = copyFractalParameters(store.parameterValues);
-  const parameterSignature = deepZoomParameterSignature(backend, parameters);
-  const viewportAspect = canvas.value
-    ? canvas.value.clientWidth / Math.max(1, canvas.value.clientHeight)
-    : 1;
+  pendingReferenceViewport = viewport;
 
   try {
     const result = await referenceOrbitClient.request({
       backend,
       parameters,
-      center,
-      scale,
-      maxIterations,
-      viewportAspect,
+      center: viewport.center,
+      scale: viewport.scale,
+      maxIterations: viewport.maxIterations,
+      viewportAspect: viewport.viewportAspect,
     });
+    if (pendingReferenceViewport === viewport) {
+      pendingReferenceViewport = undefined;
+    }
 
-    if (
-      !deepZoomMode.value ||
-      deepZoomBackend.value !== backend ||
-      deepZoomParameterSignature(deepZoomBackend.value, store.parameterValues) !==
-        parameterSignature ||
-      store.exactCenter[0] !== center[0] ||
-      store.exactCenter[1] !== center[1] ||
-      store.exactScale !== scale ||
-      store.maxIterations !== maxIterations
-    ) {
+    const currentViewport = currentReferenceViewport();
+    if (!currentViewport || !canAcceptCalculatedReferenceOrbit(result, viewport, currentViewport)) {
+      scheduleReferenceOrbit();
       return;
     }
 
+    const hadReference = referenceOrbit !== undefined;
     deepRenderer?.setReferenceOrbit(result);
     referenceOrbit = result;
-    referenceOrbitSignature = parameterSignature;
+    referenceOrbitSignature = viewport.parameterSignature;
+    referenceViewport = viewport;
     deepZoomPrecision.value = result.precisionDigits;
     deepZoomStatus.value = "ready";
-    scheduleRender();
+    if (!finishDeferredFullRender() && (!hadReference || quality === 1)) {
+      scheduleRender();
+    }
   } catch (error) {
+    if (pendingReferenceViewport === viewport) {
+      pendingReferenceViewport = undefined;
+    }
     if (error instanceof ReferenceOrbitCancelledError) {
       return;
     }
-    deepZoomStatus.value = "error";
     deepZoomError.value = error instanceof Error ? error.message : String(error);
+    deepZoomStatus.value = referenceOrbit ? "ready" : "error";
   }
+}
+
+function currentReferenceViewport(): ReferenceViewport | undefined {
+  const backend = deepZoomBackend.value;
+  if (!deepZoomMode.value || !backend) {
+    return undefined;
+  }
+
+  return {
+    backend,
+    parameterSignature: deepZoomParameterSignature(backend, store.parameterValues),
+    center: [store.exactCenter[0], store.exactCenter[1]],
+    scale: store.exactScale,
+    maxIterations: store.maxIterations,
+    viewportAspect: canvas.value
+      ? canvas.value.clientWidth / Math.max(1, canvas.value.clientHeight)
+      : 1,
+  };
+}
+
+function hasPendingReferenceReplacement(): boolean {
+  return (
+    deepZoomMode.value && (referenceTimer !== undefined || pendingReferenceViewport !== undefined)
+  );
+}
+
+function finishDeferredFullRender(): boolean {
+  if (
+    !fullRenderDeferred ||
+    interactionTimer !== undefined ||
+    activePointers.size > 0 ||
+    hasPendingReferenceReplacement()
+  ) {
+    return false;
+  }
+
+  quality = 1;
+  fullRenderDeferred = false;
+  scheduleRender();
+  return true;
 }
 
 function deepZoomParameterSignature(
@@ -707,6 +816,10 @@ function deepZoomParameterSignature(
   return `${backend}|${orbitParameterKeys
     .map((key) => `${key}:${JSON.stringify(parameters[key])}`)
     .join("|")}`;
+}
+
+function isRootBasinDeepZoomBackend(backend: DeepZoomBackendId | undefined): boolean {
+  return backend === "newton-cubic-perturbation" || backend === "nova-cubic-perturbation";
 }
 
 function copyFractalParameters(

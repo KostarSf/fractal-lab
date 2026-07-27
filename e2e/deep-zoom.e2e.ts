@@ -21,6 +21,24 @@ interface WebGlProbe {
   readonly version: string;
 }
 
+interface DeepZoomPerformanceProbe {
+  readonly draws: readonly {
+    readonly at: number;
+    readonly disjoint?: boolean;
+    readonly gpuMs?: number;
+    readonly height: number;
+    readonly maxIterations?: number;
+    readonly timerAvailable: boolean;
+    readonly width: number;
+  }[];
+  readonly referenceRequests: number;
+  readonly referenceResults: readonly {
+    readonly candidateCount: number | undefined;
+    readonly durationMs: number;
+    readonly orbitLength: number | undefined;
+  }[];
+}
+
 const TRANSITION_BEFORE = "9999";
 const TRANSITION_AFTER = "10001";
 const NOVA_PRECISION_CENTER = [
@@ -29,6 +47,18 @@ const NOVA_PRECISION_CENTER = [
 ] as const;
 const NOVA_PRECISION_MAGNIFICATION =
   "1.070058208140000140438545312564820364016081573715070873742049e+21";
+const NEWTON_PERFORMANCE_CENTER = [
+  "-0.0000013090732769674680201748306386469483646159030100203992577828080034943",
+  "-0.001304671447909685389199223546332107722645616126425974515168737340059",
+] as const;
+const NEWTON_PERFORMANCE_MAGNIFICATION =
+  "9.0811650073834342377820442066697583223684860293542614851784308324887e+27";
+const MANDELBROT_SHORT_REFERENCE_CENTER = [
+  "-1.4048601313310991290888893077228107618800577631943",
+  "0.0010390882775924769855974541599294561763543808494182",
+] as const;
+const MANDELBROT_SHORT_REFERENCE_MAGNIFICATION =
+  "444186.58960789106430842238211985499318890081104335";
 
 const SCENARIOS: readonly DeepZoomScenario[] = [
   {
@@ -122,9 +152,66 @@ for (const scenario of SCENARIOS) {
   });
 }
 
+test("Mandelbrot: a short reference orbit is accepted at higher iteration limits", async ({
+  page,
+}, testInfo) => {
+  await installPerformanceProbe(page);
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      runtimeErrors.push(message.text());
+    }
+  });
+
+  await page.goto("/");
+  const canvas = page.locator("#fractal-canvas");
+  await expect(canvas).toBeVisible();
+  const iterations = page.locator("#iterations");
+  await iterations.evaluate((element) => {
+    const input = element as HTMLInputElement;
+    input.value = "200";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await setExactView(
+    page,
+    MANDELBROT_SHORT_REFERENCE_CENTER,
+    MANDELBROT_SHORT_REFERENCE_MAGNIFICATION,
+  );
+  await waitForDeepZoom(page);
+  expectUsefulFrame(await captureCanvas(page, canvas));
+
+  await iterations.evaluate((element) => {
+    const input = element as HTMLInputElement;
+    input.value = "500";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await expect(page.locator(".deep-zoom-status")).toHaveAttribute("data-state", "preparing");
+  await waitForDeepZoom(page);
+  expectUsefulFrame(await captureCanvas(page, canvas));
+
+  const performance = await readPerformanceProbe(page);
+  expect(performance.referenceRequests).toBe(2);
+  expect(performance.referenceResults).toHaveLength(2);
+  expect(performance.referenceResults.every((result) => result.orbitLength === 158)).toBe(true);
+  const webgl = await probeWebGl(canvas);
+  expect(webgl.contextLost).toBe(false);
+  expect(webgl.error).toBe(0);
+  await expect(page.locator(".render-error")).toHaveCount(0);
+  expect(runtimeErrors).toEqual([]);
+
+  await attachMetrics(testInfo, {
+    formula: "mandelbrot",
+    magnification: MANDELBROT_SHORT_REFERENCE_MAGNIFICATION,
+    performance,
+    webgl,
+  });
+});
+
 test("Nova: the deep perturbation frame stays precise near a late pole encounter", async ({
   page,
 }, testInfo) => {
+  await installPerformanceProbe(page);
   const runtimeErrors: string[] = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   page.on("console", (message) => {
@@ -146,6 +233,27 @@ test("Nova: the deep perturbation frame stays precise near a late pole encounter
   await waitForDeepZoom(page);
   const sample = await captureCanvas(page, canvas, "nova-precision-deep.png");
   expectUsefulFrame(sample);
+  const preparation = await readPerformanceProbe(page);
+  expect(preparation.referenceRequests).toBe(1);
+  expect(preparation.referenceResults.at(-1)?.candidateCount).toBe(2);
+  const fullFrames = await collectFullFrameSamples(page);
+
+  await resetPerformanceProbe(page);
+  await page.keyboard.press("=");
+  await expect
+    .poll(async () => {
+      const probe = await readPerformanceProbe(page);
+      return probe.draws.some((draw) => draw.width >= 900);
+    })
+    .toBe(true);
+  await waitForPerformanceTimers(page);
+  const zoomInteraction = await readPerformanceProbe(page);
+  expect(zoomInteraction.referenceRequests, "pure zoom started a new reference worker").toBe(0);
+  expect(zoomInteraction.draws.find((draw) => draw.width < 900)?.maxIterations).toBe(500);
+  expect(
+    zoomInteraction.draws.length,
+    "pure zoom queued redundant deep-zoom frames",
+  ).toBeLessThanOrEqual(2);
 
   const webgl = await probeWebGl(canvas);
   expect(webgl.version).toContain("WebGL 2.0");
@@ -153,10 +261,85 @@ test("Nova: the deep perturbation frame stays precise near a late pole encounter
   expect(webgl.error).toBe(0);
   await expect(page.locator(".render-error")).toHaveCount(0);
   expect(runtimeErrors).toEqual([]);
+  reportPerformance("Nova", preparation, fullFrames, zoomInteraction, webgl);
 
   await attachMetrics(testInfo, {
     formula: "nova",
     magnification: NOVA_PRECISION_MAGNIFICATION,
+    preparation,
+    fullFrames,
+    sample: {
+      centroid: sample.centroid,
+      gradientWeight: sample.gradientWeight,
+      uniqueColors: sample.uniqueColors,
+      variance: sample.variance,
+    },
+    zoomInteraction,
+    webgl,
+  });
+});
+
+test("Newton: the extreme deep-zoom performance camera produces a useful frame", async ({
+  page,
+}, testInfo) => {
+  await installPerformanceProbe(page);
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      runtimeErrors.push(message.text());
+    }
+  });
+
+  await page.goto("/");
+  const canvas = page.locator("#fractal-canvas");
+  await expect(canvas).toBeVisible();
+  await selectFormula(page, "Newton");
+  await page.locator("#iterations").evaluate((element) => {
+    const input = element as HTMLInputElement;
+    input.value = "600";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await setExactView(page, NEWTON_PERFORMANCE_CENTER, NEWTON_PERFORMANCE_MAGNIFICATION);
+  await waitForDeepZoom(page);
+  const sample = await captureCanvas(page, canvas);
+  expectUsefulFrame(sample);
+
+  const performance = await readPerformanceProbe(page);
+  expect(performance.referenceRequests).toBe(1);
+  const fullFrames = await collectFullFrameSamples(page);
+
+  await resetPerformanceProbe(page);
+  await page.keyboard.press("=");
+  await expect
+    .poll(async () => {
+      const probe = await readPerformanceProbe(page);
+      return probe.draws.some((draw) => draw.width >= 900);
+    })
+    .toBe(true);
+  await waitForPerformanceTimers(page);
+  const zoomInteraction = await readPerformanceProbe(page);
+  expect(zoomInteraction.referenceRequests, "pure zoom started a new reference worker").toBe(0);
+  expect(zoomInteraction.draws.find((draw) => draw.width < 900)?.maxIterations).toBe(600);
+  expect(
+    zoomInteraction.draws.length,
+    "pure zoom queued redundant deep-zoom frames",
+  ).toBeLessThanOrEqual(2);
+
+  const webgl = await probeWebGl(canvas);
+  expect(webgl.version).toContain("WebGL 2.0");
+  expect(webgl.contextLost).toBe(false);
+  expect(webgl.error).toBe(0);
+  await expect(page.locator(".render-error")).toHaveCount(0);
+  expect(runtimeErrors).toEqual([]);
+  reportPerformance("Newton", performance, fullFrames, zoomInteraction, webgl);
+
+  await attachMetrics(testInfo, {
+    formula: "newton",
+    magnification: NEWTON_PERFORMANCE_MAGNIFICATION,
+    performance,
+    fullFrames,
+    zoomInteraction,
     sample: {
       centroid: sample.centroid,
       gradientWeight: sample.gradientWeight,
@@ -390,6 +573,290 @@ async function probeWebGl(canvas: Locator): Promise<WebGlProbe> {
       version: String(context.getParameter(context.VERSION)),
     };
   });
+}
+
+async function installPerformanceProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    interface TimerQueryExtension {
+      readonly GPU_DISJOINT_EXT: number;
+      readonly TIME_ELAPSED_EXT: number;
+    }
+
+    const metrics = {
+      draws: [] as {
+        at: number;
+        disjoint?: boolean;
+        gpuMs?: number;
+        height: number;
+        maxIterations?: number;
+        timerAvailable: boolean;
+        width: number;
+      }[],
+      referenceRequests: 0,
+      referenceResults: [] as {
+        candidateCount: number | undefined;
+        durationMs: number;
+        orbitLength: number | undefined;
+      }[],
+    };
+    Reflect.set(window, "__deepZoomPerformanceProbe", metrics);
+
+    const NativeWorker = window.Worker;
+    const referenceWorkers = new WeakSet<Worker>();
+    const requestStartedAt = new WeakMap<Worker, number>();
+    window.Worker = class MeasuredWorker extends NativeWorker {
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        super(scriptURL, options);
+        if (String(scriptURL).includes("reference-orbit.worker")) {
+          referenceWorkers.add(this);
+          this.addEventListener("message", (event: MessageEvent<unknown>) => {
+            const data = event.data;
+            if (
+              typeof data !== "object" ||
+              data === null ||
+              !("type" in data) ||
+              data.type !== "result"
+            ) {
+              return;
+            }
+
+            const startedAt = requestStartedAt.get(this);
+            const result =
+              "result" in data && typeof data.result === "object" && data.result !== null
+                ? data.result
+                : undefined;
+            metrics.referenceResults.push({
+              candidateCount:
+                result && "candidateCount" in result && typeof result.candidateCount === "number"
+                  ? result.candidateCount
+                  : undefined,
+              durationMs: startedAt === undefined ? 0 : performance.now() - startedAt,
+              orbitLength:
+                result && "orbitLength" in result && typeof result.orbitLength === "number"
+                  ? result.orbitLength
+                  : undefined,
+            });
+          });
+        }
+      }
+
+      override postMessage(
+        message: unknown,
+        transferOrOptions?: StructuredSerializeOptions | Transferable[],
+      ): void {
+        if (referenceWorkers.has(this)) {
+          metrics.referenceRequests += 1;
+          requestStartedAt.set(this, performance.now());
+        }
+        if (transferOrOptions === undefined) {
+          super.postMessage(message);
+        } else if (Array.isArray(transferOrOptions)) {
+          super.postMessage(message, transferOrOptions as Transferable[]);
+        } else {
+          super.postMessage(message, transferOrOptions);
+        }
+      }
+    };
+
+    const nativeDrawArrays = Reflect.get(
+      WebGL2RenderingContext.prototype,
+      "drawArrays",
+    ) as WebGL2RenderingContext["drawArrays"];
+    const nativeGetUniformLocation = Reflect.get(
+      WebGL2RenderingContext.prototype,
+      "getUniformLocation",
+    ) as WebGL2RenderingContext["getUniformLocation"];
+    const nativeUniform1i = Reflect.get(
+      WebGL2RenderingContext.prototype,
+      "uniform1i",
+    ) as WebGL2RenderingContext["uniform1i"];
+    const uniformNames = new WeakMap<WebGLUniformLocation, string>();
+    const maximumIterations = new WeakMap<WebGL2RenderingContext, number>();
+    WebGL2RenderingContext.prototype.getUniformLocation = function measuredGetUniformLocation(
+      program: WebGLProgram,
+      name: string,
+    ): WebGLUniformLocation | null {
+      const location = Reflect.apply(nativeGetUniformLocation, this, [program, name]);
+      if (location) {
+        uniformNames.set(location, name);
+      }
+      return location;
+    };
+    WebGL2RenderingContext.prototype.uniform1i = function measuredUniform1i(
+      location: WebGLUniformLocation | null,
+      value: GLint,
+    ): void {
+      if (location && uniformNames.get(location) === "u_maxIterations") {
+        maximumIterations.set(this, value);
+      }
+      Reflect.apply(nativeUniform1i, this, [location, value]);
+    };
+    const timerExtensions = new WeakMap<WebGL2RenderingContext, TimerQueryExtension | null>();
+    WebGL2RenderingContext.prototype.drawArrays = function measuredDrawArrays(
+      mode: GLenum,
+      first: GLint,
+      count: GLsizei,
+    ): void {
+      let extension = timerExtensions.get(this);
+      if (extension === undefined) {
+        extension = this.getExtension(
+          "EXT_disjoint_timer_query_webgl2",
+        ) as TimerQueryExtension | null;
+        timerExtensions.set(this, extension);
+      }
+      const query = extension ? this.createQuery() : null;
+      const draw = {
+        at: performance.now(),
+        height: this.drawingBufferHeight,
+        maxIterations: maximumIterations.get(this),
+        timerAvailable: extension !== null && query !== null,
+        width: this.drawingBufferWidth,
+      } as {
+        at: number;
+        disjoint?: boolean;
+        gpuMs?: number;
+        height: number;
+        maxIterations?: number;
+        timerAvailable: boolean;
+        width: number;
+      };
+      if ((this.canvas as HTMLCanvasElement).id === "fractal-canvas") {
+        metrics.draws.push(draw);
+      }
+
+      if (extension && query) {
+        this.beginQuery(extension.TIME_ELAPSED_EXT, query);
+      }
+      try {
+        Reflect.apply(nativeDrawArrays, this, [mode, first, count]);
+      } finally {
+        if (extension && query) {
+          this.endQuery(extension.TIME_ELAPSED_EXT);
+          pollTimerQuery(this, extension, query, draw);
+        }
+      }
+    };
+
+    function pollTimerQuery(
+      gl: WebGL2RenderingContext,
+      extension: TimerQueryExtension,
+      query: WebGLQuery,
+      draw: {
+        disjoint?: boolean;
+        gpuMs?: number;
+      },
+    ): void {
+      if (gl.isContextLost()) {
+        draw.disjoint = true;
+        return;
+      }
+      if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) {
+        window.setTimeout(() => pollTimerQuery(gl, extension, query, draw), 8);
+        return;
+      }
+
+      draw.disjoint = Boolean(gl.getParameter(extension.GPU_DISJOINT_EXT));
+      if (!draw.disjoint) {
+        draw.gpuMs = Number(gl.getQueryParameter(query, gl.QUERY_RESULT)) / 1_000_000;
+      }
+      gl.deleteQuery(query);
+    }
+  });
+}
+
+async function readPerformanceProbe(page: Page): Promise<DeepZoomPerformanceProbe> {
+  return page.evaluate(() => {
+    const probe = Reflect.get(window, "__deepZoomPerformanceProbe") as DeepZoomPerformanceProbe;
+    return {
+      draws: probe.draws.map((draw) => ({ ...draw })),
+      referenceRequests: probe.referenceRequests,
+      referenceResults: probe.referenceResults.map((result) => ({ ...result })),
+    };
+  });
+}
+
+async function resetPerformanceProbe(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const probe = Reflect.get(window, "__deepZoomPerformanceProbe") as {
+      draws: unknown[];
+      referenceRequests: number;
+      referenceResults: unknown[];
+    };
+    probe.draws.length = 0;
+    probe.referenceRequests = 0;
+    probe.referenceResults.length = 0;
+  });
+}
+
+async function waitForPerformanceTimers(page: Page): Promise<void> {
+  await expect
+    .poll(async () => {
+      const probe = await readPerformanceProbe(page);
+      return probe.draws.every(
+        (draw) => !draw.timerAvailable || draw.gpuMs !== undefined || draw.disjoint !== undefined,
+      );
+    })
+    .toBe(true);
+}
+
+async function collectFullFrameSamples(page: Page): Promise<DeepZoomPerformanceProbe> {
+  await resetPerformanceProbe(page);
+  const palette = page.getByLabel("Палитра");
+  for (const value of ["1", "2", "3", "0", "1"]) {
+    const previousDrawCount = (await readPerformanceProbe(page)).draws.length;
+    await palette.selectOption(value);
+    await expect
+      .poll(async () => (await readPerformanceProbe(page)).draws.length)
+      .toBeGreaterThan(previousDrawCount);
+    await waitForPerformanceTimers(page);
+  }
+  return readPerformanceProbe(page);
+}
+
+function reportPerformance(
+  formula: string,
+  preparation: DeepZoomPerformanceProbe,
+  fullFrames: DeepZoomPerformanceProbe,
+  interaction: DeepZoomPerformanceProbe | undefined,
+  webgl: WebGlProbe,
+): void {
+  const fullGpuSamples = fullFrames.draws
+    .map((draw) => draw.gpuMs)
+    .filter((value): value is number => value !== undefined)
+    .sort((left, right) => left - right);
+  const previewGpuSamples = (interaction?.draws ?? [])
+    .filter((draw) => draw.width < 900)
+    .map((draw) => draw.gpuMs)
+    .filter((value): value is number => value !== undefined);
+
+  console.log(
+    `[deep-zoom-performance] ${JSON.stringify({
+      formula,
+      renderer: webgl.renderer,
+      reference: preparation.referenceResults.at(-1),
+      full: {
+        drawingBuffers: fullFrames.draws.map((draw) => [draw.width, draw.height]),
+        drawCount: fullFrames.draws.length,
+        gpuDisjoint: fullFrames.draws.some((draw) => draw.disjoint),
+        iterations: fullFrames.draws.map((draw) => draw.maxIterations),
+        medianGpuMs:
+          fullGpuSamples.length === 0
+            ? undefined
+            : fullGpuSamples[Math.floor(fullGpuSamples.length / 2)],
+        samplesGpuMs: fullGpuSamples,
+      },
+      interaction: interaction
+        ? {
+            drawingBuffers: interaction.draws.map((draw) => [draw.width, draw.height]),
+            drawCount: interaction.draws.length,
+            gpuDisjoint: interaction.draws.some((draw) => draw.disjoint),
+            iterations: interaction.draws.map((draw) => draw.maxIterations),
+            previewGpuMs: previewGpuSamples,
+            referenceRequests: interaction.referenceRequests,
+          }
+        : undefined,
+    })}`,
+  );
 }
 
 async function attachMetrics(testInfo: TestInfo, value: unknown): Promise<void> {

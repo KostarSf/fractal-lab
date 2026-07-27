@@ -194,6 +194,7 @@ describe("reference orbit", () => {
     expect(selected.center).not.toEqual(request.center);
     expect(minimumOrbitMagnitude(centered)).toBeLessThan(0.08);
     expect(minimumOrbitMagnitude(selected)).toBeGreaterThan(0.25);
+    expect(selected.candidateCount).toBe(2);
   });
 
   it("skips a singular Newton center when selecting the viewport reference", () => {

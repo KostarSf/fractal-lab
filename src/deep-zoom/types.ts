@@ -20,6 +20,7 @@ export interface ReferenceOrbitResult {
   readonly orbitLength: number;
   readonly texelsPerIteration: number;
   readonly values: Float32Array;
+  readonly candidateCount: number;
 }
 
 export type ReferenceOrbitWorkerResponse =
