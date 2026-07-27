@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref } from "vue";
-import { createCameraFromMagnification, magnificationForScale } from "../math/high-precision.ts";
+import {
+  createCameraFromMagnification,
+  magnificationForScale,
+  parseCoordinateLine,
+} from "../math/high-precision.ts";
 import { useFractalStore } from "../stores/fractal.ts";
 
 const emit = defineEmits<{
@@ -82,6 +86,39 @@ async function copyCoordinates(): Promise<void> {
   }
 }
 
+async function pasteCoordinates(): Promise<void> {
+  errorMessage.value = "";
+
+  let clipboardText: string;
+  try {
+    if (!navigator.clipboard?.readText) {
+      throw new Error("Clipboard API недоступен.");
+    }
+    clipboardText = await navigator.clipboard.readText();
+  } catch {
+    errorMessage.value =
+      "Не удалось прочитать буфер обмена. Разрешите доступ или вставьте значения вручную.";
+    return;
+  }
+
+  try {
+    const [nextReal, nextImaginary, nextZoom] = parseCoordinateLine(clipboardText);
+    const camera = createCameraFromMagnification(
+      [nextReal, nextImaginary],
+      nextZoom,
+      activeFormula.value.initialView.scale,
+    );
+    real.value = nextReal;
+    imaginary.value = nextImaginary;
+    zoom.value = nextZoom;
+    store.setExactCamera(camera);
+    closeDialog();
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : "Проверьте формат координат и масштаба.";
+  }
+}
+
 function copyWithFallback(value: string): void {
   const input = document.createElement("textarea");
   input.value = value;
@@ -110,7 +147,6 @@ function copyWithFallback(value: string): void {
       <form class="coordinates-shell" @submit.prevent="applyCamera">
         <header class="coordinates-header">
           <div>
-            <span class="dialog-eyebrow">Точный переход</span>
             <h2 id="coordinates-title">Координаты и масштаб</h2>
             <p>Введите центр комплексной плоскости и увеличение относительно исходного вида.</p>
           </div>
@@ -165,13 +201,24 @@ function copyWithFallback(value: string): void {
 
         <div class="coordinate-line">
           <code>{{ coordinateLine }}</code>
-          <button type="button" @click="copyCoordinates">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="8" y="8" width="10" height="10" rx="2" />
-              <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-            </svg>
-            {{ copied ? "Скопировано" : "Копировать строку" }}
-          </button>
+          <div class="coordinate-line-actions">
+            <button type="button" @click="pasteCoordinates">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M9 5h6m-5-2h4a2 2 0 0 1 2 2v1h2a2 2 0 0 1 2 2v11H4V8a2 2 0 0 1 2-2h2V5a2 2 0 0 1 2-2Z"
+                />
+                <path d="m9 13 3 3 3-3m-3-4v7" />
+              </svg>
+              Вставить из буфера
+            </button>
+            <button type="button" @click="copyCoordinates">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="8" y="8" width="10" height="10" rx="2" />
+                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+              </svg>
+              {{ copied ? "Скопировано" : "Копировать строку" }}
+            </button>
+          </div>
         </div>
 
         <footer class="coordinate-actions">
@@ -215,15 +262,6 @@ function copyWithFallback(value: string): void {
   justify-content: space-between;
   gap: 24px;
   padding: 30px 32px 24px;
-}
-
-.dialog-eyebrow {
-  display: block;
-  margin-bottom: 9px;
-  color: #817a91;
-  font: 9px/1 var(--mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .coordinates-header h2 {
@@ -345,6 +383,12 @@ function copyWithFallback(value: string): void {
   white-space: nowrap;
 }
 
+.coordinate-line-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
 .coordinate-line button {
   display: flex;
   height: 30px;
@@ -431,6 +475,7 @@ button:focus-visible {
   }
 
   .coordinate-line button {
+    flex: 1;
     justify-content: center;
   }
 }

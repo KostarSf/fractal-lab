@@ -4,6 +4,7 @@ import {
   createSerializedCamera,
   decimalDifferenceToNumber,
   magnificationForScale,
+  parseCoordinateLine,
   precisionForScale,
   shouldUseDeepZoom,
   transformCamera,
@@ -85,6 +86,23 @@ describe("high precision camera", () => {
     );
     expect(() => createCameraFromMagnification(["Infinity", "0"], "1", 3.1)).toThrow(
       "Координаты должны быть конечными",
+    );
+  });
+
+  it("parses the same coordinate line format used for copying", () => {
+    expect(parseCoordinateLine(" -0.743643887037151, 0.13182590420533, 1e+30 ")).toEqual([
+      "-0.743643887037151",
+      "0.13182590420533",
+      "1e+30",
+    ]);
+  });
+
+  it("rejects incomplete coordinate lines", () => {
+    expect(() => parseCoordinateLine("-0.75, 0.1")).toThrow(
+      "действительную часть, мнимую часть и увеличение",
+    );
+    expect(() => parseCoordinateLine("-0.75, , 1000")).toThrow(
+      "действительную часть, мнимую часть и увеличение",
     );
   });
 });

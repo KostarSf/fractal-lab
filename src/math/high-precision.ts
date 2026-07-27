@@ -82,6 +82,20 @@ export function createCameraFromMagnification(
   };
 }
 
+export function parseCoordinateLine(
+  coordinateLine: string,
+): readonly [real: DecimalString, imaginary: DecimalString, magnification: DecimalString] {
+  const values = coordinateLine.split(",").map((value) => value.trim());
+
+  if (values.length !== 3 || values.some((value) => value.length === 0)) {
+    throw new Error(
+      "Строка должна содержать действительную часть, мнимую часть и увеличение через запятую.",
+    );
+  }
+
+  return [values[0]!, values[1]!, values[2]!];
+}
+
 export function magnificationForScale(initialScale: number, scale: DecimalString): DecimalString {
   const D = decimalContext(scale);
   const magnification = new D(initialScale.toString()).dividedBy(scale);
